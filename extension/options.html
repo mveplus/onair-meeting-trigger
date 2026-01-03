@@ -138,14 +138,14 @@
     </div>
 
     <div class="card">
-      <h2>1) Services</h2>
+      <h2>Meeting Services</h2>
       <label><input type="checkbox" id="svc_meet"> Google Meet (meet.google.com)</label>
       <label><input type="checkbox" id="svc_teams"> Microsoft Teams (teams.microsoft.com)</label>
       <label><input type="checkbox" id="svc_zoom"> Zoom (zoom.us / app.zoom.us)</label>
     </div>
 
     <div class="card">
-      <h2>2) Custom services</h2>
+      <h2>Custom Services</h2>
       <p class="muted">Add your own meeting service by URL prefix (include scheme, trailing slash recommended).</p>
       <div class="btns">
         <button id="add_custom_service">Add Custom Service</button>
@@ -154,13 +154,13 @@
     </div>
 
     <div class="card">
-      <h2>3) Trigger mode</h2>
+      <h2>Trigger Mode</h2>
       <label><input type="radio" name="mode" value="ANY_TAB" id="mode_any"> Any matching tab exists (pre-join supported)</label>
       <label><input type="radio" name="mode" value="ACTIVE_TAB" id="mode_active"> Only when a matching tab is active (focused)</label>
     </div>
 
     <div class="card">
-      <h2>4) HTTP settings</h2>
+      <h2>HTTP Settings</h2>
       <label>
         Timeout (seconds)
         <input type="number" id="http_timeout" min="1" max="20" step="1" value="3" />
@@ -169,7 +169,7 @@
     </div>
 
     <div class="card">
-      <h2>5) Targets (LAN / local outputs)</h2>
+      <h2>Targets (LAN / local outputs)</h2>
       <p class="muted">
         Add any number of outputs: local listener, your LED sign, Tasmota, Shelly, etc.<br/>
         You can use tokens: <code>{state}</code> <code>{service}</code> <code>{url}</code> <code>{ts}</code>
