@@ -13,7 +13,9 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 
 ## Features
 - Meeting detection (Meet / Teams / Zoom)
+- Custom service detection (user-defined URL prefixes)
 - HTTP hooks (Home Assistant, Tasmota, Shelly, ESP)
+- Import/export HTTP Hook settings
 - Flatpak / Snap compatible
 - Privacy-first (no telemetry)
 

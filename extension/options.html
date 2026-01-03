@@ -27,6 +27,7 @@
     .targetHead b { font-size: 14px; }
     .smallRow { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
     .pill { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid #ccc; font-size:12px; color:#444; }
+    .serviceItem { border:1px solid #eee; border-radius: 12px; padding: 12px; margin: 10px 0; }
   </style>
 </head>
 <body>
@@ -40,13 +41,22 @@
   </div>
 
   <div class="card">
-    <h2>2) Trigger mode</h2>
+    <h2>2) Custom services</h2>
+    <p class="muted">Add your own meeting service by URL prefix (include scheme, trailing slash recommended).</p>
+    <div class="btns">
+      <button id="add_custom_service">Add Custom Service</button>
+    </div>
+    <div id="custom_services"></div>
+  </div>
+
+  <div class="card">
+    <h2>3) Trigger mode</h2>
     <label><input type="radio" name="mode" value="ANY_TAB" id="mode_any"> Any matching tab exists (pre-join supported)</label>
     <label><input type="radio" name="mode" value="ACTIVE_TAB" id="mode_active"> Only when a matching tab is active (focused)</label>
   </div>
 
   <div class="card">
-    <h2>3) HTTP settings</h2>
+    <h2>4) HTTP settings</h2>
     <label>
       Timeout (seconds)
       <input type="number" id="http_timeout" min="1" max="20" step="1" value="3" />
@@ -55,7 +65,7 @@
   </div>
 
   <div class="card">
-    <h2>4) Targets (LAN / local outputs)</h2>
+    <h2>5) Targets (LAN / local outputs)</h2>
     <p class="muted">
       Add any number of outputs: local listener, your LED sign, Tasmota, Shelly, etc.<br/>
       You can use tokens: <code>{state}</code> <code>{service}</code> <code>{url}</code> <code>{ts}</code>
@@ -65,6 +75,9 @@
       <button id="add_listener">Add Listener</button>
       <button id="add_led">Add Simple LED</button>
       <button id="add_hook">Add HTTP Hook (Tasmota/etc.)</button>
+      <button id="export_hooks">Export HTTP Hooks</button>
+      <button id="import_hooks">Import HTTP Hooks</button>
+      <input type="file" id="import_hooks_file" accept="application/json" style="display:none" />
     </div>
 
     <div id="targets"></div>

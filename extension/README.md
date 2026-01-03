@@ -12,6 +12,7 @@ It’s designed for “ON AIR” lights, LED signs, Tasmota/Shelly relays, or an
   - Google Meet (`meet.google.com`)
   - Microsoft Teams (`teams.microsoft.com`)
   - Zoom (`zoom.us`, `app.zoom.us`)
+  - Custom services (user-defined URL prefixes)
 - Supports two detection modes:
   - **Any matching tab exists** (works even pre-join)
   - **Only when matching tab is active**
@@ -78,6 +79,12 @@ Method:
 
 No headers/body needed for typical Tasmota setups.
 
+#### Import/export hooks
+On the Settings page you can **export** all HTTP Hook targets to a JSON file,
+or **import** hooks from a JSON file to quickly move them between machines.
+
+Imported hooks are appended to your existing targets.
+
 ---
 
 ## Tokens (templating)
@@ -88,6 +95,24 @@ In Listener and HTTP Hook targets, you can use:
 - `{service}` → `meet`, `teams`, `zoom` (or `test` during Test buttons)
 - `{url}` → the meeting tab URL (when available)
 - `{ts}` → timestamp (unix ms)
+
+---
+
+## Custom services
+
+Add a custom service by name and one or more URL prefixes. Each prefix must include
+the scheme (`https://`) and should end with a trailing slash.
+
+Example:
+```
+Name: Webex
+Prefixes:
+https://web.webex.com/meet/
+https://company.webex.com/meet/
+```
+
+When a tab URL starts with any of those prefixes, the extension will report
+`service = Webex`.
 
 ---
 

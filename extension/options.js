@@ -2,7 +2,8 @@ const DEFAULTS = {
   services: { meet: true, teams: true, zoom: true },
   triggerMode: "ANY_TAB",
   timeoutSec: 3,
-  targets: []
+  targets: [],
+  customServices: []
 };
 
 function $(id){ return document.getElementById(id); }
@@ -19,7 +20,12 @@ function showStatus(msg, ok=true) {
 
 function migrateIfNeeded(config) {
   // If already new schema
-  if (config?.targets && Array.isArray(config.targets)) return config;
+  if (config?.targets && Array.isArray(config.targets)) {
+    const cfg = { ...DEFAULTS, ...config };
+    cfg.services = { ...DEFAULTS.services, ...(config?.services || {}) };
+    cfg.customServices = normalizeCustomServices(config?.customServices);
+    return cfg;
+  }
 
   // Try to migrate legacy fields if present
   const legacy = config || {};
@@ -42,7 +48,8 @@ function migrateIfNeeded(config) {
     services: { ...DEFAULTS.services, ...(legacy.services || {}) },
     triggerMode: legacy.triggerMode || "ANY_TAB",
     timeoutSec: Math.max(1, Math.min(20, parseInt(legacy.direct?.timeoutSec ?? 3, 10))),
-    targets
+    targets,
+    customServices: []
   };
 }
 
@@ -68,6 +75,94 @@ function getOriginsFromTargets(cfg) {
     }
   }
   return urls;
+}
+
+function normalizePrefixes(prefixes) {
+  if (!Array.isArray(prefixes)) return [];
+  return prefixes.map(p => String(p || "").trim()).filter(Boolean);
+}
+
+function normalizeCustomServices(customServices) {
+  if (!Array.isArray(customServices)) return [];
+  return customServices
+    .map(s => {
+      const name = String(s?.name || "").trim();
+      const prefixes = normalizePrefixes(s?.prefixes || []);
+      if (!name || prefixes.length === 0) return null;
+      return {
+        id: s?.id || newId("svc"),
+        name,
+        enabled: s?.enabled !== false,
+        prefixes
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeHeadersList(headers) {
+  if (!Array.isArray(headers)) return [];
+  return headers
+    .map(h => (h && typeof h.key === "string") ? { key: h.key.trim(), value: String(h.value ?? "") } : null)
+    .filter(h => h && h.key);
+}
+
+function renderCustomServices(cfg) {
+  const wrap = $("custom_services");
+  wrap.innerHTML = "";
+
+  (cfg.customServices || []).forEach((s, idx) => {
+    if (!s.id) s.id = newId("svc");
+    const div = document.createElement("div");
+    div.className = "serviceItem";
+    div.dataset.id = s.id;
+
+    const prefixesText = (s.prefixes || []).join("\n");
+
+    div.innerHTML = `
+      <div class="targetHead">
+        <div>
+          <b>${esc(s.name || "Custom Service")}</b>
+          <span class="pill">${esc(s.id)}</span>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <label style="margin:0;"><input type="checkbox" class="s_enabled" ${s.enabled ? "checked":""}> Enabled</label>
+          <button class="danger s_remove">Remove</button>
+        </div>
+      </div>
+      <label>Service name
+        <input type="text" class="s_name" placeholder="Example: Webex" value="${esc(s.name || "")}">
+      </label>
+      <label>URL prefixes (one per line)
+        <textarea class="s_prefixes" placeholder="https://example.com/meeting/">${esc(prefixesText)}</textarea>
+      </label>
+    `;
+
+    div.querySelector(".s_remove").addEventListener("click", () => {
+      cfg.customServices.splice(idx, 1);
+      renderCustomServices(cfg);
+    });
+
+    wrap.appendChild(div);
+  });
+}
+
+function readCustomServicesFromUI(cfg) {
+  const wrap = $("custom_services");
+  const nodes = [...wrap.querySelectorAll(".serviceItem")];
+  const out = [];
+
+  for (const n of nodes) {
+    const id = n.dataset.id || newId("svc");
+    const name = n.querySelector(".s_name")?.value.trim() || "";
+    const enabled = !!n.querySelector(".s_enabled")?.checked;
+    const prefixesRaw = (n.querySelector(".s_prefixes")?.value || "").split("\n");
+    const prefixes = normalizePrefixes(prefixesRaw);
+    if (!name || prefixes.length === 0) continue;
+    out.push({ id, name, enabled, prefixes });
+  }
+
+  cfg.customServices = out;
+  return cfg;
 }
 
 function renderTargets(cfg) {
@@ -232,8 +327,22 @@ async function load() {
   $("http_timeout").value = cfg.timeoutSec ?? 3;
 
   // Store current cfg on window for edits
+  cfg.customServices = normalizeCustomServices(cfg.customServices);
   window.__cfg = cfg;
+  renderCustomServices(cfg);
   renderTargets(cfg);
+}
+
+function addCustomService() {
+  const cfg = window.__cfg;
+  if (!cfg.customServices) cfg.customServices = [];
+  cfg.customServices.push({
+    id: newId("svc"),
+    name: "",
+    enabled: true,
+    prefixes: []
+  });
+  renderCustomServices(cfg);
 }
 
 function addTarget(type) {
@@ -283,9 +392,11 @@ async function save() {
     },
     triggerMode: $("mode_active").checked ? "ACTIVE_TAB" : "ANY_TAB",
     timeoutSec: Math.max(1, Math.min(20, parseInt($("http_timeout").value || "3", 10))),
-    targets: cfg.targets || []
+    targets: cfg.targets || [],
+    customServices: cfg.customServices || []
   };
 
+  cfg = readCustomServicesFromUI(cfg);
   cfg = readTargetsFromUI(cfg);
 
   // Request permissions for all enabled target origins
@@ -297,6 +408,90 @@ async function save() {
   await chrome.storage.sync.set({ config: cfg });
   showStatus("Saved");
   chrome.runtime.sendMessage({ type: "CONFIG_UPDATED" });
+}
+
+function normalizeHook(raw) {
+  const onUrl = String(raw?.onUrl || "").trim();
+  const offUrl = String(raw?.offUrl || "").trim();
+  if (!onUrl && !offUrl) return null;
+
+  const method = String(raw?.method || "GET").toUpperCase();
+  const headers = normalizeHeadersList(raw?.headers);
+  const basicAuth = raw?.basicAuth
+    ? { user: String(raw.basicAuth.user || ""), pass: String(raw.basicAuth.pass || "") }
+    : null;
+
+  return {
+    id: newId("hook"),
+    type: "httpHook",
+    enabled: raw?.enabled !== false,
+    onUrl,
+    offUrl,
+    method,
+    headers,
+    body: String(raw?.body || ""),
+    basicAuth
+  };
+}
+
+function exportHooks() {
+  let cfg = window.__cfg || DEFAULTS;
+  cfg = readTargetsFromUI({ ...cfg, targets: cfg.targets || [] });
+  const hooks = (cfg.targets || []).filter(t => t.type === "httpHook").map(t => ({
+    onUrl: t.onUrl || "",
+    offUrl: t.offUrl || "",
+    method: t.method || "GET",
+    headers: t.headers || [],
+    body: t.body || "",
+    basicAuth: t.basicAuth || null,
+    enabled: t.enabled !== false
+  }));
+
+  const payload = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    hooks
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "onair-hooks.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showStatus(`Exported ${hooks.length} hook(s)`);
+}
+
+async function importHooksFromFile(file) {
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    let hooks = [];
+
+    if (Array.isArray(parsed)) {
+      hooks = parsed;
+    } else if (Array.isArray(parsed?.hooks)) {
+      hooks = parsed.hooks;
+    } else if (Array.isArray(parsed?.targets)) {
+      hooks = parsed.targets.filter(t => t?.type === "httpHook");
+    }
+
+    const normalized = hooks.map(normalizeHook).filter(Boolean);
+    if (normalized.length === 0) {
+      showStatus("No valid hooks found", false);
+      return;
+    }
+
+    const cfg = window.__cfg;
+    cfg.targets = [...(cfg.targets || []), ...normalized];
+    renderTargets(cfg);
+    showStatus(`Imported ${normalized.length} hook(s)`);
+  } catch {
+    showStatus("Invalid JSON file", false);
+  }
 }
 
 function applyTemplate(str, vars) {
@@ -388,5 +583,14 @@ $("test_off").addEventListener("click", () => testAll("OFF"));
 $("add_listener").addEventListener("click", () => addTarget("listener"));
 $("add_led").addEventListener("click", () => addTarget("simpleLed"));
 $("add_hook").addEventListener("click", () => addTarget("httpHook"));
+$("add_custom_service").addEventListener("click", addCustomService);
+
+$("export_hooks").addEventListener("click", exportHooks);
+$("import_hooks").addEventListener("click", () => $("import_hooks_file").click());
+$("import_hooks_file").addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (file) importHooksFromFile(file);
+  e.target.value = "";
+});
 
 load();

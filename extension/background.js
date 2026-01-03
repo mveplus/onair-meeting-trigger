@@ -20,7 +20,8 @@ const DEFAULTS = {
     // { id:"listener1", type:"listener", enabled:false, url:"http://127.0.0.1:8765/event?state={state}&service={service}&url={url}&ts={ts}" },
     // { id:"tasmota1", type:"httpHook", enabled:false, onUrl:"http://192.168.1.17/cm?cmnd=Power%20On", offUrl:"http://192.168.1.17/cm?cmnd=Power%20Off", method:"GET", headers:[], body:"" },
     // { id:"led1", type:"simpleLed", enabled:false, baseUrl:"http://192.168.1.50", verifyStatus:false }
-  ]
+  ],
+  customServices: []
 };
 
 const URL_PREFIXES = {
@@ -60,6 +61,25 @@ function normalizeHeaders(headers) {
     .map(h => ({ key: h.key.trim(), value: String(h.value ?? "") }));
 }
 
+function normalizeCustomServices(customServices) {
+  if (!Array.isArray(customServices)) return [];
+  return customServices
+    .map(s => {
+      const name = String(s?.name || "").trim();
+      const prefixes = Array.isArray(s?.prefixes)
+        ? s.prefixes.map(p => String(p || "").trim()).filter(Boolean)
+        : [];
+      if (!name || prefixes.length === 0) return null;
+      return {
+        id: s?.id || newId("svc"),
+        name,
+        enabled: s?.enabled !== false,
+        prefixes
+      };
+    })
+    .filter(Boolean);
+}
+
 // Legacy -> targets migration (best-effort)
 function migrateConfig(config) {
   // If already on new schema, just normalize a bit
@@ -67,6 +87,7 @@ function migrateConfig(config) {
     const cfg = { ...DEFAULTS, ...config };
     cfg.services = { ...DEFAULTS.services, ...(config?.services || {}) };
     cfg.timeoutSec = Math.max(1, Math.min(20, parseInt(cfg.timeoutSec ?? 3, 10)));
+    cfg.customServices = normalizeCustomServices(config?.customServices);
 
     cfg.targets = cfg.targets.map(t => {
       const tt = { ...t };
@@ -128,7 +149,8 @@ function migrateConfig(config) {
     services: legacy.services,
     triggerMode: legacy.triggerMode || "ANY_TAB",
     timeoutSec: Math.max(1, Math.min(20, parseInt(legacy.direct?.timeoutSec ?? 3, 10))),
-    targets
+    targets,
+    customServices: []
   };
 }
 
@@ -143,11 +165,23 @@ async function getConfig() {
   return cfg;
 }
 
+function getServiceMatchers(cfg) {
+  const builtIns = Object.entries(URL_PREFIXES).map(([key, prefixes]) => ({
+    key,
+    prefixes,
+    enabled: !!cfg.services[key]
+  })).filter(s => s.enabled);
+
+  const custom = (cfg.customServices || []).filter(s => s.enabled && s.name && (s.prefixes || []).length > 0)
+    .map(s => ({ key: s.name, prefixes: s.prefixes }));
+
+  return [...custom, ...builtIns];
+}
+
 function matchService(url, cfg) {
   if (!url) return null;
-  for (const [svc, prefixes] of Object.entries(URL_PREFIXES)) {
-    if (!cfg.services[svc]) continue;
-    if (prefixes.some(p => url.startsWith(p))) return svc;
+  for (const svc of getServiceMatchers(cfg)) {
+    if (svc.prefixes.some(p => url.startsWith(p))) return svc.key;
   }
   return null;
 }
