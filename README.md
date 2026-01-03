@@ -1,5 +1,7 @@
 # ON-AIR Meeting Trigger
 
+![ON-AIR Meeting Trigger](resources/OnAir_Meeting_Trigger_Extention_media.png)
+
 Detect Google Meet, Microsoft Teams, and Zoom meetings and trigger
 local or LAN automations (Home Assistant, Tasmota, LED signs).
 
