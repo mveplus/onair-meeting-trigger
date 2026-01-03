@@ -458,13 +458,13 @@ function exportHooks() {
   let cfg = window.__cfg || DEFAULTS;
   cfg = readCustomServicesFromUI({ ...cfg, customServices: cfg.customServices || [] });
   cfg = readTargetsFromUI({ ...cfg, targets: cfg.targets || [] });
-  cfg.services = {
+  const services = {
     meet: $("svc_meet").checked,
     teams: $("svc_teams").checked,
     zoom: $("svc_zoom").checked
   };
-  cfg.triggerMode = $("mode_active").checked ? "ACTIVE_TAB" : "ANY_TAB";
-  cfg.timeoutSec = Math.max(1, Math.min(20, parseInt($("http_timeout").value || "3", 10)));
+  const triggerMode = $("mode_active").checked ? "ACTIVE_TAB" : "ANY_TAB";
+  const timeoutSec = Math.max(1, Math.min(20, parseInt($("http_timeout").value || "3", 10)));
 
   const targets = (cfg.targets || []).map(t => {
     if (t.type === "listener") {
@@ -493,9 +493,9 @@ function exportHooks() {
   const payload = {
     version: 1,
     exportedAt: new Date().toISOString(),
-    services: cfg.services || DEFAULTS.services,
-    triggerMode: cfg.triggerMode || DEFAULTS.triggerMode,
-    timeoutSec: cfg.timeoutSec ?? DEFAULTS.timeoutSec,
+    services,
+    triggerMode,
+    timeoutSec,
     targets,
     customServices: cfg.customServices || []
   };
