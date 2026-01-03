@@ -13,8 +13,53 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify manifest version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"     # e.g. v0.1.2
+          VER="${TAG#v}"               # -> 0.1.2
+
+          python3 - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+
+          ver = os.environ["VER"]
+          p = Path("extension/manifest.json")
+          data = json.loads(p.read_text(encoding="utf-8"))
+          mv = data.get("version")
+
+          if mv != ver:
+            print(f"ERROR: Tag version {ver} does not match manifest.json version {mv}", file=sys.stderr)
+            sys.exit(1)
+
+          print(f"OK: manifest.json version matches tag ({ver})")
+          PY
+        env:
+          VER: ${{ github.ref_name }}
+        # github.ref_name includes leading 'v' already; we strip it in shell and pass via env below
+      - name: Set VER env properly
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "VER=${TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Re-verify using VER env (belt & braces)
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          ver = os.environ["VER"]
+          p = Path("extension/manifest.json")
+          data = json.loads(p.read_text(encoding="utf-8"))
+          mv = data.get("version")
+          if mv != ver:
+            print(f"ERROR: Tag version {ver} does not match manifest.json version {mv}", file=sys.stderr)
+            sys.exit(1)
+          print(f"OK: manifest.json version matches tag ({ver})")
+          PY
 
       - name: Build extension zip
         run: |
@@ -26,4 +71,3 @@ jobs:
         with:
           files: dist.zip
           generate_release_notes: true
-
