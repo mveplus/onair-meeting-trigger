@@ -79,11 +79,13 @@ Method:
 
 No headers/body needed for typical Tasmota setups.
 
-#### Import/export hooks
-On the Settings page you can **export** all HTTP Hook targets to a JSON file,
-or **import** hooks from a JSON file to quickly move them between machines.
+#### Import/export settings
+On the Settings page you can **export** all settings (targets, custom services,
+and trigger settings) to `onair-settings.json`, or **import** settings to quickly
+move them between machines.
 
-Imported hooks are appended to your existing targets.
+Imported targets and custom services are appended to your existing list.
+Trigger settings are applied immediately in the UI.
 
 ---
 

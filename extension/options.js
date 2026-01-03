@@ -106,6 +106,50 @@ function normalizeHeadersList(headers) {
     .filter(h => h && h.key);
 }
 
+function normalizeTarget(raw) {
+  const type = raw?.type;
+  if (type === "listener") {
+    const url = String(raw?.url || "").trim();
+    if (!url) return null;
+    return { id: newId("listener"), type: "listener", enabled: raw?.enabled !== false, url };
+  }
+  if (type === "simpleLed") {
+    const baseUrl = trimSlash(String(raw?.baseUrl || "").trim());
+    if (!baseUrl) return null;
+    return {
+      id: newId("led"),
+      type: "simpleLed",
+      enabled: raw?.enabled !== false,
+      baseUrl,
+      verifyStatus: !!raw?.verifyStatus
+    };
+  }
+  if (type === "httpHook") {
+    const onUrl = String(raw?.onUrl || "").trim();
+    const offUrl = String(raw?.offUrl || "").trim();
+    if (!onUrl && !offUrl) return null;
+
+    const method = String(raw?.method || "GET").toUpperCase();
+    const headers = normalizeHeadersList(raw?.headers);
+    const basicAuth = raw?.basicAuth
+      ? { user: String(raw.basicAuth.user || ""), pass: String(raw.basicAuth.pass || "") }
+      : null;
+
+    return {
+      id: newId("hook"),
+      type: "httpHook",
+      enabled: raw?.enabled !== false,
+      onUrl,
+      offUrl,
+      method,
+      headers,
+      body: String(raw?.body || ""),
+      basicAuth
+    };
+  }
+  return null;
+}
+
 function renderCustomServices(cfg) {
   const wrap = $("custom_services");
   wrap.innerHTML = "";
@@ -410,85 +454,122 @@ async function save() {
   chrome.runtime.sendMessage({ type: "CONFIG_UPDATED" });
 }
 
-function normalizeHook(raw) {
-  const onUrl = String(raw?.onUrl || "").trim();
-  const offUrl = String(raw?.offUrl || "").trim();
-  if (!onUrl && !offUrl) return null;
-
-  const method = String(raw?.method || "GET").toUpperCase();
-  const headers = normalizeHeadersList(raw?.headers);
-  const basicAuth = raw?.basicAuth
-    ? { user: String(raw.basicAuth.user || ""), pass: String(raw.basicAuth.pass || "") }
-    : null;
-
-  return {
-    id: newId("hook"),
-    type: "httpHook",
-    enabled: raw?.enabled !== false,
-    onUrl,
-    offUrl,
-    method,
-    headers,
-    body: String(raw?.body || ""),
-    basicAuth
-  };
-}
-
 function exportHooks() {
   let cfg = window.__cfg || DEFAULTS;
+  cfg = readCustomServicesFromUI({ ...cfg, customServices: cfg.customServices || [] });
   cfg = readTargetsFromUI({ ...cfg, targets: cfg.targets || [] });
-  const hooks = (cfg.targets || []).filter(t => t.type === "httpHook").map(t => ({
-    onUrl: t.onUrl || "",
-    offUrl: t.offUrl || "",
-    method: t.method || "GET",
-    headers: t.headers || [],
-    body: t.body || "",
-    basicAuth: t.basicAuth || null,
-    enabled: t.enabled !== false
-  }));
+  cfg.services = {
+    meet: $("svc_meet").checked,
+    teams: $("svc_teams").checked,
+    zoom: $("svc_zoom").checked
+  };
+  cfg.triggerMode = $("mode_active").checked ? "ACTIVE_TAB" : "ANY_TAB";
+  cfg.timeoutSec = Math.max(1, Math.min(20, parseInt($("http_timeout").value || "3", 10)));
+
+  const targets = (cfg.targets || []).map(t => {
+    if (t.type === "listener") {
+      return { type: "listener", url: t.url || "", enabled: t.enabled !== false };
+    }
+    if (t.type === "simpleLed") {
+      return {
+        type: "simpleLed",
+        baseUrl: t.baseUrl || "",
+        verifyStatus: !!t.verifyStatus,
+        enabled: t.enabled !== false
+      };
+    }
+    return {
+      type: "httpHook",
+      onUrl: t.onUrl || "",
+      offUrl: t.offUrl || "",
+      method: t.method || "GET",
+      headers: t.headers || [],
+      body: t.body || "",
+      basicAuth: t.basicAuth || null,
+      enabled: t.enabled !== false
+    };
+  });
 
   const payload = {
     version: 1,
     exportedAt: new Date().toISOString(),
-    hooks
+    services: cfg.services || DEFAULTS.services,
+    triggerMode: cfg.triggerMode || DEFAULTS.triggerMode,
+    timeoutSec: cfg.timeoutSec ?? DEFAULTS.timeoutSec,
+    targets,
+    customServices: cfg.customServices || []
   };
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "onair-hooks.json";
+  a.download = "onair-settings.json";
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  showStatus(`Exported ${hooks.length} hook(s)`);
+  showStatus(`Exported ${targets.length} target(s)`);
 }
 
 async function importHooksFromFile(file) {
   try {
     const text = await file.text();
     const parsed = JSON.parse(text);
-    let hooks = [];
+    let targets = [];
+    let customServices = [];
+    let importedSettings = null;
 
     if (Array.isArray(parsed)) {
-      hooks = parsed;
+      targets = parsed;
     } else if (Array.isArray(parsed?.hooks)) {
-      hooks = parsed.hooks;
+      targets = parsed.hooks.map(h => ({ ...h, type: "httpHook" }));
     } else if (Array.isArray(parsed?.targets)) {
-      hooks = parsed.targets.filter(t => t?.type === "httpHook");
+      targets = parsed.targets;
+    }
+    if (parsed?.services || parsed?.triggerMode || parsed?.timeoutSec !== undefined) {
+      importedSettings = {
+        services: { ...DEFAULTS.services, ...(parsed.services || {}) },
+        triggerMode: parsed.triggerMode || DEFAULTS.triggerMode,
+        timeoutSec: Math.max(1, Math.min(20, parseInt(parsed.timeoutSec ?? DEFAULTS.timeoutSec, 10)))
+      };
+    }
+    if (Array.isArray(parsed?.customServices)) {
+      customServices = normalizeCustomServices(parsed.customServices);
     }
 
-    const normalized = hooks.map(normalizeHook).filter(Boolean);
-    if (normalized.length === 0) {
-      showStatus("No valid hooks found", false);
+    const normalizedTargets = targets.map(normalizeTarget).filter(Boolean);
+    if (normalizedTargets.length === 0 && customServices.length === 0 && !importedSettings) {
+      showStatus("No valid settings found", false);
       return;
     }
 
     const cfg = window.__cfg;
-    cfg.targets = [...(cfg.targets || []), ...normalized];
+    if (importedSettings) {
+      cfg.services = importedSettings.services;
+      cfg.triggerMode = importedSettings.triggerMode;
+      cfg.timeoutSec = importedSettings.timeoutSec;
+
+      $("svc_meet").checked = !!cfg.services.meet;
+      $("svc_teams").checked = !!cfg.services.teams;
+      $("svc_zoom").checked = !!cfg.services.zoom;
+
+      $("mode_any").checked = cfg.triggerMode === "ANY_TAB";
+      $("mode_active").checked = cfg.triggerMode === "ACTIVE_TAB";
+
+      $("http_timeout").value = cfg.timeoutSec ?? DEFAULTS.timeoutSec;
+    }
+    cfg.targets = [...(cfg.targets || []), ...normalizedTargets];
+    if (customServices.length > 0) {
+      cfg.customServices = [...(cfg.customServices || []), ...customServices];
+      renderCustomServices(cfg);
+    }
     renderTargets(cfg);
-    showStatus(`Imported ${normalized.length} hook(s)`);
+    const parts = [];
+    if (normalizedTargets.length > 0) parts.push(`${normalizedTargets.length} target(s)`);
+    if (customServices.length > 0) parts.push(`${customServices.length} service(s)`);
+    if (importedSettings) parts.push("trigger settings");
+    showStatus(`Imported ${parts.join(", ")}`);
   } catch {
     showStatus("Invalid JSON file", false);
   }
