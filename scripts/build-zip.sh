@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/.."
-rm -f dist.zip
-( cd extension && zip -r ../dist.zip . -x "*.DS_Store" )
-echo "Built: dist.zip"
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+cd "$ROOT/extension"
+
+ZIP="$ROOT/dist.zip"
+rm -f "$ZIP"
+zip -r "$ZIP" . -x "*.DS_Store"
+
+echo "Built $ZIP"
