@@ -17,5 +17,23 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 - Flatpak / Snap compatible
 - Privacy-first (no telemetry)
 
+
+## Releasing
+
+Releases are automated via GitHub Actions.
+
+To publish a new version:
+```bash
+./scripts/release.sh X.Y.Z
+```
+
+This will:
+- update extension/manifest.json and VERSION
+- commit the change
+- create a git tag (vX.Y.Z)
+- push to GitHub
+- trigger an automated GitHub Release with a ZIP artifact
+
+
 ## License
 MIT
