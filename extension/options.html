@@ -5,91 +5,196 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ON-AIR Settings</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 16px; }
-    .card { max-width: 980px; border: 1px solid #ddd; border-radius: 14px; padding: 16px; margin: 12px 0; }
-    h1 { margin: 0 0 8px 0; font-size: 20px; }
-    h2 { margin: 0 0 8px 0; font-size: 16px; }
-    label { display:block; margin: 8px 0; }
-    input[type="text"], input[type="number"], select, textarea {
-      width: 100%; max-width: 760px; padding: 8px; border-radius: 10px; border: 1px solid #ccc;
+    :root {
+      --ink: #1b1c20;
+      --muted: #5a5e6a;
+      --card: #f9f6ef;
+      --paper: #fffaf0;
+      --accent: #ea6a4f;
+      --accent-2: #1f5c85;
+      --border: #e2dacb;
+      --shadow: 0 8px 26px rgba(20, 24, 34, 0.12);
     }
-    textarea { min-height: 74px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Palatino Linotype", "Book Antiqua", Palatino, "Times New Roman", serif;
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 400px at 10% 0%, #f7efe0 0%, transparent 60%),
+        radial-gradient(900px 380px at 90% 10%, #e9f1f6 0%, transparent 65%),
+        linear-gradient(180deg, #fff8eb 0%, #f4efe4 100%);
+    }
+    .page { max-width: 1080px; margin: 24px auto 40px; padding: 0 20px; }
+    .hero {
+      display: grid;
+      gap: 8px;
+      padding: 18px 20px;
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      animation: rise 0.5s ease-out;
+    }
+    h1 {
+      margin: 0;
+      font-family: "Gill Sans", "Trebuchet MS", "Segoe UI", sans-serif;
+      font-size: 22px;
+      letter-spacing: 0.4px;
+    }
+    .subtitle { margin: 0; color: var(--muted); font-size: 14px; }
+    h2 {
+      margin: 0 0 10px 0;
+      font-family: "Gill Sans", "Trebuchet MS", "Segoe UI", sans-serif;
+      font-size: 16px;
+      color: var(--accent-2);
+      letter-spacing: 0.3px;
+    }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      margin: 14px 0;
+      background: var(--card);
+      box-shadow: var(--shadow);
+      animation: fadeIn 0.6s ease-out;
+    }
+    label { display:block; margin: 10px 0; }
+    input[type="text"], input[type="number"], select, textarea {
+      width: 100%;
+      max-width: 820px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid #d7d1c4;
+      background: #fffdf8;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      font-family: "Gill Sans", "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(234, 106, 79, 0.2);
+      outline: none;
+    }
+    textarea { min-height: 88px; font-family: "Courier New", Courier, monospace; }
     .row { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .muted { color:#666; font-size: 13px; }
+    .muted { color: var(--muted); font-size: 13px; }
     .btns { display:flex; gap: 10px; align-items:center; margin-top: 12px; flex-wrap: wrap; }
-    button { padding: 8px 12px; border-radius: 10px; border: 1px solid #ccc; background: #fafafa; cursor:pointer; }
-    button.primary { border-color:#0aa; background:#e9ffff; }
-    button.danger { border-color:#c33; background:#fff0f0; }
-    .status { margin-left: 10px; font-size: 13px; color:#0a0; }
-    code { background:#f4f4f4; padding: 2px 6px; border-radius: 6px; }
-    .target { border:1px dashed #ddd; border-radius: 12px; padding: 12px; margin: 12px 0; }
+    button {
+      padding: 9px 14px;
+      border-radius: 999px;
+      border: 1px solid #d7d1c4;
+      background: #fff7ea;
+      cursor:pointer;
+      font-family: "Gill Sans", "Trebuchet MS", "Segoe UI", sans-serif;
+      letter-spacing: 0.2px;
+      transition: transform 0.08s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+    button:hover { border-color: var(--accent); box-shadow: 0 6px 16px rgba(23, 27, 38, 0.12); }
+    button:active { transform: translateY(1px); }
+    button.primary { border-color: var(--accent); background: #ffe8dd; }
+    button.danger { border-color:#b83b2f; background:#ffe7e4; }
+    .status { margin-left: 10px; font-size: 13px; color:#0a7a34; }
+    code { background:#f1e9db; padding: 2px 6px; border-radius: 6px; }
+    .target {
+      border:1px dashed #d4c7b5;
+      border-radius: 14px;
+      padding: 14px;
+      margin: 12px 0;
+      background: #fffaf0;
+    }
     .targetHead { display:flex; align-items:center; justify-content:space-between; gap: 10px; flex-wrap: wrap; }
     .targetHead b { font-size: 14px; }
     .smallRow { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-    .pill { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid #ccc; font-size:12px; color:#444; }
-    .serviceItem { border:1px solid #eee; border-radius: 12px; padding: 12px; margin: 10px 0; }
+    .pill {
+      display:inline-block;
+      padding:2px 8px;
+      border-radius:999px;
+      border:1px solid #d7d1c4;
+      font-size:12px;
+      color:#444;
+      background: #fffdf7;
+    }
+    .serviceItem {
+      border:1px solid #e0d4c2;
+      border-radius: 12px;
+      padding: 12px;
+      margin: 10px 0;
+      background: #fffaf0;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @media (max-width: 760px) {
+      .row { grid-template-columns: 1fr; }
+      .page { padding: 0 14px; }
+      .card, .hero { padding: 14px; }
+    }
   </style>
 </head>
 <body>
-  <h1>ON-AIR Meeting Trigger — Settings</h1>
-
-  <div class="card">
-    <h2>1) Services</h2>
-    <label><input type="checkbox" id="svc_meet"> Google Meet (meet.google.com)</label>
-    <label><input type="checkbox" id="svc_teams"> Microsoft Teams (teams.microsoft.com)</label>
-    <label><input type="checkbox" id="svc_zoom"> Zoom (zoom.us / app.zoom.us)</label>
-  </div>
-
-  <div class="card">
-    <h2>2) Custom services</h2>
-    <p class="muted">Add your own meeting service by URL prefix (include scheme, trailing slash recommended).</p>
-    <div class="btns">
-      <button id="add_custom_service">Add Custom Service</button>
-    </div>
-    <div id="custom_services"></div>
-  </div>
-
-  <div class="card">
-    <h2>3) Trigger mode</h2>
-    <label><input type="radio" name="mode" value="ANY_TAB" id="mode_any"> Any matching tab exists (pre-join supported)</label>
-    <label><input type="radio" name="mode" value="ACTIVE_TAB" id="mode_active"> Only when a matching tab is active (focused)</label>
-  </div>
-
-  <div class="card">
-    <h2>4) HTTP settings</h2>
-    <label>
-      Timeout (seconds)
-      <input type="number" id="http_timeout" min="1" max="20" step="1" value="3" />
-    </label>
-    <p class="muted">Applies to all targets.</p>
-  </div>
-
-  <div class="card">
-    <h2>5) Targets (LAN / local outputs)</h2>
-    <p class="muted">
-      Add any number of outputs: local listener, your LED sign, Tasmota, Shelly, etc.<br/>
-      You can use tokens: <code>{state}</code> <code>{service}</code> <code>{url}</code> <code>{ts}</code>
-    </p>
-
-    <div class="btns">
-      <button id="add_listener">Add Listener</button>
-      <button id="add_led">Add Simple LED</button>
-      <button id="add_hook">Add HTTP Hook (Tasmota/etc.)</button>
-      <button id="export_hooks">Export HTTP Hooks</button>
-      <button id="import_hooks">Import HTTP Hooks</button>
-      <input type="file" id="import_hooks_file" accept="application/json" style="display:none" />
+  <div class="page">
+    <div class="hero">
+      <h1>ON-AIR Meeting Trigger — Settings</h1>
+      <p class="subtitle">Design your meeting signals, services, and automations in one place.</p>
     </div>
 
-    <div id="targets"></div>
-  </div>
+    <div class="card">
+      <h2>1) Services</h2>
+      <label><input type="checkbox" id="svc_meet"> Google Meet (meet.google.com)</label>
+      <label><input type="checkbox" id="svc_teams"> Microsoft Teams (teams.microsoft.com)</label>
+      <label><input type="checkbox" id="svc_zoom"> Zoom (zoom.us / app.zoom.us)</label>
+    </div>
 
-  <div class="btns">
-    <button class="primary" id="save">Save</button>
-    <button id="test_on">Test ALL ON</button>
-    <button id="test_off">Test ALL OFF</button>
-    <span class="status" id="status"></span>
-  </div>
+    <div class="card">
+      <h2>2) Custom services</h2>
+      <p class="muted">Add your own meeting service by URL prefix (include scheme, trailing slash recommended).</p>
+      <div class="btns">
+        <button id="add_custom_service">Add Custom Service</button>
+      </div>
+      <div id="custom_services"></div>
+    </div>
 
-  <script src="options.js"></script>
+    <div class="card">
+      <h2>3) Trigger mode</h2>
+      <label><input type="radio" name="mode" value="ANY_TAB" id="mode_any"> Any matching tab exists (pre-join supported)</label>
+      <label><input type="radio" name="mode" value="ACTIVE_TAB" id="mode_active"> Only when a matching tab is active (focused)</label>
+    </div>
+
+    <div class="card">
+      <h2>4) HTTP settings</h2>
+      <label>
+        Timeout (seconds)
+        <input type="number" id="http_timeout" min="1" max="20" step="1" value="3" />
+      </label>
+      <p class="muted">Applies to all targets.</p>
+    </div>
+
+    <div class="card">
+      <h2>5) Targets (LAN / local outputs)</h2>
+      <p class="muted">
+        Add any number of outputs: local listener, your LED sign, Tasmota, Shelly, etc.<br/>
+        You can use tokens: <code>{state}</code> <code>{service}</code> <code>{url}</code> <code>{ts}</code>
+      </p>
+
+      <div class="btns">
+        <button id="add_listener">Add Listener</button>
+        <button id="add_led">Add Simple LED</button>
+        <button id="add_hook">Add HTTP Hook (Tasmota/etc.)</button>
+        <button id="export_hooks">Export HTTP Hooks</button>
+        <button id="import_hooks">Import HTTP Hooks</button>
+        <input type="file" id="import_hooks_file" accept="application/json" style="display:none" />
+      </div>
+
+      <div id="targets"></div>
+    </div>
+
+    <div class="btns">
+      <button class="primary" id="save">Save</button>
+      <button id="test_on">Test ALL ON</button>
+      <button id="test_off">Test ALL OFF</button>
+      <span class="status" id="status"></span>
+    </div>
+
+    <script src="options.js"></script>
+  </div>
 </body>
 </html>
