@@ -21,8 +21,9 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 - Flatpak / Snap compatible
 - Privacy-first (no telemetry)
 
+![ON-AIR Meeting Trigger Settings](resources/OnAir_Settings.png)
 
-## Releasing
+## Releasing 
 
 Releases are automated via GitHub Actions.
 
@@ -40,4 +41,5 @@ This will:
 
 
 ## License
-MIT
+
+This project is licensed under the [MIT License](LICENSE).
