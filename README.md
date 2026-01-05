@@ -5,10 +5,9 @@
 Detect Google Meet, Microsoft Teams, and Zoom meetings and trigger
 local or LAN automations (Home Assistant, Tasmota, LED signs).
 
-## Published on the [Chrome Web Store](https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn?utm_source=item-share-cb)
 
 ## Quick start
-- Chromium / Chrome extension 
+- Chromium / Chrome extension [now published at CWS](https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn?utm_source=item-share-cb)
 - LAN-first, no cloud required
 - Works great with Home Assistant
 
