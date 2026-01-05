@@ -1,12 +1,14 @@
 # ON-AIR Meeting Trigger
 
-![ON-AIR Meeting Trigger](resources/OnAir_Meeting_Trigger_Extention_media.png)
+![ON-AIR Meeting Trigger](resources/OnAir_Meeting_Trigger_Extension_media.png)
 
 Detect Google Meet, Microsoft Teams, and Zoom meetings and trigger
 local or LAN automations (Home Assistant, Tasmota, LED signs).
 
+## Published on the [Chrome Web Store](https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn?utm_source=item-share-cb)
+
 ## Quick start
-- Chromium / Chrome extension
+- Chromium / Chrome extension 
 - LAN-first, no cloud required
 - Works great with Home Assistant
 

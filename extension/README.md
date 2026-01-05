@@ -205,10 +205,18 @@ POST
 ```
 http://192.168.1.200:8123/api/services/input_boolean/turn_on
 ```
+or turn ON WiZ Light, example:
+```
+http://192.168.1.200:8123/api/services/light/turn_on
+```
 
 **OFF URL**
 ```
 http://192.168.1.200:8123/api/services/input_boolean/turn_off
+```
+or turn OFF WiZ Light, example:
+```
+http://192.168.1.200:8123/api/services/light/turn_off
 ```
 
 **Headers**
@@ -220,6 +228,10 @@ Content-Type: application/json
 **Body**
 ```json
 {"entity_id":"input_boolean.on_air"}
+```
+or a WiZ Lights, example:
+```json
+{"entity_id":["light.wiz_1","light.wiz_2"]}'
 ```
 
 Save and approve the permission prompt.  
@@ -253,10 +265,7 @@ chrome://extensions → Load unpacked
 
 ### Snap (Ubuntu Chromium)
 
-Recommended location:
-```
-~/snap/chromium/common/extensions/onair/
-```
+Works with [Chrome Web Store](https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn?utm_source=item-share-cb) 
 
 ---
 
