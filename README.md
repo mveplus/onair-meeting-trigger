@@ -10,6 +10,7 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 - Chromium / Chrome extension [now published at CWS](https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn?utm_source=item-share-cb)
 - LAN-first, no cloud required
 - Works great with Home Assistant
+- Works without Smart Home hardware [Phone push notifications](docs/ON-AIR-Push-Notifications.md)
 
 👉 **Full documentation:**  
 [extension/README.md](extension/README.md)
