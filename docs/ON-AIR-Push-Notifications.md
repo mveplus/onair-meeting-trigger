@@ -55,9 +55,7 @@ https://ntfy.sh/my-meeting-super-secret-link-2012-3456/publish?title=%E2%9C%85%2
 - APP_TOKEN
 - USER_KEY (or group key)
 
-⚠️ Pushover **requires HTTP POST**.
-Pushover **requires HTTP POST** with `application/x-www-form-urlencoded` data.  
-It **cannot be triggered using GET-only hooks**.
+⚠️ Pushover **requires HTTP POST** with `application/x-www-form-urlencoded` data. It **cannot be triggered using GET-only hooks**.
 
 ### ON-AIR (curl)
 ```bash
