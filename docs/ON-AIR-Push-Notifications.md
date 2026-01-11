@@ -9,13 +9,13 @@ The Chrome extension only needs to call a URL.
 
 ## Option A — ntfy (fast, free, simple)
 
-![Push ntfy app – create topic](resources/Push_Ntfy_app_create_topic.jpg)
+![Push ntfy app – create topic](./resources/Push_Ntfy_app_create_topic.jpg)
 
 ### Topic use a hard to guess phrase [ do not use this example ]:
 ```
 my-meeting-super-secret-link-2012-3456
 ```
-![Push ntfy app – test the new topic](resources/Push_Ntfy_app_subscribe_topic_example.jpg)
+![Push ntfy app – test the new topic](./resources/Push_Ntfy_app_subscribe_topic_example.jpg)
 
 ### ON-AIR (curl)
 ```bash
@@ -29,7 +29,7 @@ curl -H "Priority: 5" \
 ```
 https://ntfy.sh/my-meeting-super-secret-link-2012-3456/publish?title=%F0%9F%93%9E%20ON-AIR&message=Martin%20is%20in%20a%20meeting&priority=urgent
 ```
-![Push ntfy app – ON-AIR notification](resources/Push_ON_AIR_Notification.jpg)
+![Push ntfy app – ON-AIR notification](./resources/Push_ON_AIR_Notification.jpg)
 
 
 ### OFF-AIR (curl)
@@ -45,7 +45,7 @@ curl -H "Priority: 2" \
 https://ntfy.sh/my-meeting-super-secret-link-2012-3456/publish?title=%E2%9C%85%20OFF-AIR&message=Meeting%20ended&priority=low
 ```
 
-![Push ntfy app – OFF-AIR notification](resources/Push_OFF_AIR_Notification.jpg)
+![Push ntfy app – OFF-AIR notification](./resources/Push_OFF_AIR_Notification.jpg)
 
 ---
 
