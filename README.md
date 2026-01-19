@@ -8,7 +8,7 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 
 ## Quick start
 - Chromium / Chrome extension [now published at CWS](https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn?utm_source=item-share-cb)
-- LAN-first, no cloud required
+- LAN-first, no cloud required e.g. [OnAir Led/Neon sign](https://github.com/mveplus/onair-led-sign-firmware) 
 - Works great with Home Assistant
 - Works without Smart Home hardware [Phone push notifications](docs/ON-AIR-Push-Notifications.md)
 
