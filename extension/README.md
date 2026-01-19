@@ -1,6 +1,6 @@
 # ON-AIR Meeting Trigger (Chromium Extension)
 
-This extension detects when **Google Meet**, **Microsoft Teams**, or **Zoom** tabs are open (or active — depending on mode) and then triggers **one or more local/LAN outputs**.
+This extension detects when **Google Meet**, **Microsoft Teams**, **Zoom** or **custom - user defined** tabs are open (or active — depending on mode) and then triggers **one or more local/remote outputs**.
 
 It’s designed for “ON AIR” lights, LED signs, Tasmota/Shelly relays, or any IoT device that can be controlled via **HTTP hooks**.
 
@@ -17,6 +17,8 @@ It’s designed for “ON AIR” lights, LED signs, Tasmota/Shelly relays, or an
   - **Any matching tab exists** (works even pre-join)
   - **Only when matching tab is active**
 - When state changes, fires **Targets** (multiple outputs supported)
+- Global settings: timeout (applies to all targets) and toolbar icon mode
+- Redesigned settings UI with templates and quick actions
 
 State is either:
 - `ON` (a matching meeting tab exists / is active)
@@ -60,6 +62,7 @@ Config includes:
 - Optional headers (one per line: `Key: Value`)
 - Optional body (tokens supported)
 - Optional Basic Auth (`user:pass`)
+- Optional status checks (allowed status codes + response-body match)
 
 #### Tasmota example
 Turn a Tasmota relay on/off via HTTP:
@@ -79,13 +82,28 @@ Method:
 
 No headers/body needed for typical Tasmota setups.
 
+#### Push notifications 
+
+![Push guide](https://raw.githubusercontent.com/mveplus/onair-meeting-trigger/refs/heads/docs/docs/ON-AIR-Push-Notifications.md)
+
 #### Import/export settings
 On the Settings page you can **export** all settings (targets, custom services,
-and trigger settings) to `onair-settings.json`, or **import** settings to quickly
+trigger mode, timeout, and toolbar icon mode) to `onair-settings.json`, or **import** settings to quickly
 move them between machines.
 
 Imported targets and custom services are appended to your existing list.
 Trigger settings are applied immediately in the UI.
+After importing, click **Save** to persist changes and permissions.
+
+---
+
+## Templates
+
+The settings UI includes **templates** for common targets. Pick a template and click **Add from Template** to prefill URLs, headers, and method.
+
+See the full guide:
+
+- `docs/TEMPLATES.md`
 
 ---
 
@@ -143,6 +161,7 @@ Open the extension **Settings** page and use:
 
 - **Test ALL ON**
 - **Test ALL OFF**
+- Per-target **Test ON / Test OFF** buttons
 
 These will send requests to every enabled target.
 
@@ -273,3 +292,7 @@ Works with [Chrome Web Store](https://chromewebstore.google.com/detail/dhcgpjlbn
 - Prevents `ERR_FILE_NOT_FOUND` popup errors
 - Avoids sandbox path invalidation
 - Recommended for Home Assistant + LAN IoT usage
+
+## ![Privacy poclicy](https://raw.githubusercontent.com/mveplus/onair-meeting-trigger/refs/heads/docs/docs/PRIVACY.md)
+
+## ![MIT License](https://raw.githubusercontent.com/mveplus/onair-meeting-trigger/refs/heads/docs/LICENSE)

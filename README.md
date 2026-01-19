@@ -12,18 +12,21 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 - Works great with Home Assistant
 - Works without Smart Home hardware [Phone push notifications](docs/ON-AIR-Push-Notifications.md)
 
-👉 **Full documentation:**  
-[extension/README.md](extension/README.md)
+👉 **Full documentation:**  [extension/README.md](extension/README.md)
+  
+👉 **Templates guide:**  [docs/TEMPLATES.md](docs/TEMPLATES.md)
 
 ## Features
 - Meeting detection (Meet / Teams / Zoom)
 - Custom service detection (user-defined URL prefixes)
 - HTTP hooks (Home Assistant, Tasmota, Shelly, ESP)
-- Import/export HTTP Hook settings
+- Redesigned settings UI
+- Built-in templates for common targets
+- Import/export settings (includes trigger mode, timeout, toolbar icon mode)
 - Flatpak / Snap compatible
 - Privacy-first (no telemetry)
 
-![ON-AIR Meeting Trigger Settings](resources/OnAir_Settings.png)
+![ON-AIR Meeting Trigger Settings](resources/Screenshot_OnAir_dark_theme.png)
 
 ## Releasing 
 

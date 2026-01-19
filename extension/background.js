@@ -15,6 +15,7 @@ const DEFAULTS = {
   services: { meet: true, teams: true, zoom: true },
   triggerMode: "ANY_TAB",
   timeoutSec: 3,
+  iconMode: "alwaysColor",
   targets: [
     // Examples:
     // { id:"listener1", type:"listener", enabled:false, url:"http://127.0.0.1:8765/event?state={state}&service={service}&url={url}&ts={ts}" },
@@ -45,6 +46,21 @@ const ICONS_GRAY = {
 
 let current = { state: "OFF", service: null, url: null, ts: Date.now() };
 let debounceTimer = null;
+let debugEnabled = false;
+
+function debugLog(...args) {
+  if (!debugEnabled) return;
+  console.debug("[ON-AIR]", ...args);
+}
+
+chrome.storage.local.get({ debugLogs: false }).then(({ debugLogs }) => {
+  debugEnabled = !!debugLogs;
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes.debugLogs) return;
+  debugEnabled = !!changes.debugLogs.newValue;
+});
 
 function trimSlash(s) {
   return (s || "").replace(/\/+$/, "");
@@ -87,6 +103,7 @@ function migrateConfig(config) {
     const cfg = { ...DEFAULTS, ...config };
     cfg.services = { ...DEFAULTS.services, ...(config?.services || {}) };
     cfg.timeoutSec = Math.max(1, Math.min(20, parseInt(cfg.timeoutSec ?? 3, 10)));
+    cfg.iconMode = config.iconMode || DEFAULTS.iconMode;
     cfg.customServices = normalizeCustomServices(config?.customServices);
 
     cfg.targets = cfg.targets.map(t => {
@@ -150,7 +167,8 @@ function migrateConfig(config) {
     triggerMode: legacy.triggerMode || "ANY_TAB",
     timeoutSec: Math.max(1, Math.min(20, parseInt(legacy.direct?.timeoutSec ?? 3, 10))),
     targets,
-    customServices: []
+    customServices: [],
+    iconMode: DEFAULTS.iconMode
   };
 }
 
@@ -231,9 +249,11 @@ async function callUrl(url, timeoutSec, fetchOpts = {}) {
   }
 }
 
-async function setToolbarIcon(state) {
+async function setToolbarIcon(state, cfg) {
   try {
-    await chrome.action.setIcon({ path: state === "OFF" ? ICONS_GRAY : ICONS_COLOR });
+    const mode = cfg?.iconMode || DEFAULTS.iconMode;
+    const useColor = mode === "alwaysColor" ? true : state !== "OFF";
+    await chrome.action.setIcon({ path: useColor ? ICONS_COLOR : ICONS_GRAY });
   } catch {
     // ignore
   }
@@ -322,7 +342,7 @@ async function runHttpHookTarget(target, vars, timeoutSec) {
 }
 
 async function applySideEffects(next, cfg) {
-  await setToolbarIcon(next.state);
+  await setToolbarIcon(next.state, cfg);
 
   const vars = {
     state: next.state,
@@ -345,21 +365,25 @@ async function applySideEffects(next, cfg) {
 }
 
 async function tick(reason = "") {
+  debugLog("tick:start", reason);
   const cfg = await getConfig();
   const next = await computeState(cfg);
 
   if (sameState(next, current)) {
     // Ensure icon is correct after SW wake
-    await setToolbarIcon(next.state);
+    await setToolbarIcon(next.state, cfg);
     current = { ...next, ts: Date.now() };
+    debugLog("tick:same", current.state, current.service);
     return;
   }
 
   if (debounceTimer) clearTimeout(debounceTimer);
+  debugLog("tick:debounce", next.state, next.service);
   debounceTimer = setTimeout(async () => {
     const cfg2 = await getConfig();
     const next2 = await computeState(cfg2);
     current = { ...next2, ts: Date.now() };
+    debugLog("tick:apply", current.state, current.service);
     await applySideEffects(current, cfg2);
   }, 400);
 }
@@ -370,6 +394,7 @@ chrome.tabs.onUpdated.addListener(() => tick("updated"));
 chrome.tabs.onRemoved.addListener(() => tick("removed"));
 chrome.tabs.onActivated.addListener(() => tick("activated"));
 chrome.windows.onFocusChanged.addListener(() => tick("focus"));
+chrome.windows.onRemoved.addListener(() => tick("window-removed"));
 
 chrome.runtime.onStartup.addListener(() => tick("startup"));
 chrome.runtime.onInstalled.addListener(() => tick("installed"));

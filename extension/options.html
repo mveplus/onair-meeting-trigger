@@ -6,46 +6,98 @@
   <title>ON-AIR Settings</title>
   <style>
     :root {
-      --ink: #1b1c20;
-      --muted: #5a5e6a;
-      --card: #f9f6ef;
-      --paper: #fffaf0;
-      --accent: #ea6a4f;
-      --accent-2: #1f5c85;
-      --border: #e2dacb;
-      --shadow: 0 8px 26px rgba(20, 24, 34, 0.12);
+      --ink: #0c2430;
+      --muted: #4b6a73;
+      --card: #f2fbfb;
+      --paper: #f6fdff;
+      --accent: #00b0b0;
+      --accent-2: #004050;
+      --border: #c6e0e2;
+      --shadow: 0 10px 26px rgba(0, 64, 80, 0.12);
+      --glow: 0 0 0 3px rgba(0, 176, 176, 0.18);
+      --field-bg: #f9feff;
+      --button-bg: #f3fcfd;
+      --button-text: #0c2430;
+      --chip-bg: #e6f3f4;
     }
     * { box-sizing: border-box; }
     body {
-      font-family: "Palatino Linotype", "Book Antiqua", Palatino, "Times New Roman", serif;
+      font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
       margin: 0;
       color: var(--ink);
       background:
-        radial-gradient(1200px 400px at 10% 0%, #f7efe0 0%, transparent 60%),
-        radial-gradient(900px 380px at 90% 10%, #e9f1f6 0%, transparent 65%),
-        linear-gradient(180deg, #fff8eb 0%, #f4efe4 100%);
+        radial-gradient(900px 420px at 8% 0%, rgba(0, 176, 176, 0.2) 0%, transparent 60%),
+        radial-gradient(700px 360px at 92% 10%, rgba(0, 64, 80, 0.16) 0%, transparent 65%),
+        linear-gradient(160deg, #e6f6f6 0%, #f5fbfb 45%, #e7eef1 100%);
     }
-    .page { max-width: 1080px; margin: 24px auto 40px; padding: 0 20px; }
+    body[data-theme="dark"] {
+      --ink: #e7f3f5;
+      --muted: #9fb5bb;
+      --card: #0f1f25;
+      --paper: #12242b;
+      --accent: #35d5d5;
+      --accent-2: #7fd7e2;
+      --border: #1f3942;
+      --shadow: 0 12px 26px rgba(0, 0, 0, 0.35);
+      --glow: 0 0 0 3px rgba(53, 213, 213, 0.2);
+      --field-bg: #13262d;
+      --button-bg: #172a32;
+      --button-text: #e7f3f5;
+      --chip-bg: #1b3038;
+      background:
+        radial-gradient(900px 420px at 8% 0%, rgba(53, 213, 213, 0.18) 0%, transparent 60%),
+        radial-gradient(700px 360px at 92% 10%, rgba(0, 64, 80, 0.35) 0%, transparent 65%),
+        linear-gradient(160deg, #0a151a 0%, #0e1a1f 45%, #0b1418 100%);
+    }
+    .page { max-width: 1060px; margin: 24px auto 40px; padding: 0 20px; }
     .hero {
       display: grid;
       gap: 8px;
       padding: 18px 20px;
-      background: var(--paper);
+      background: linear-gradient(120deg, rgba(0, 176, 176, 0.12), rgba(0, 64, 80, 0.08)), var(--paper);
       border: 1px solid var(--border);
       border-radius: 18px;
       box-shadow: var(--shadow);
       animation: rise 0.5s ease-out;
     }
+    .heroTop {
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .heroLeft {
+      display:flex;
+      align-items:center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .heroRight { margin-left: auto; }
+    .themeToggle {
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      border: 1px solid #cfe2e3;
+      background: var(--button-bg);
+      color: var(--button-text);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .themeToggle input { display:none; }
+    .themeToggle .icon { font-size: 14px; opacity: 0.45; transition: opacity 0.2s ease; }
+    .themeToggle input:checked ~ .moon { opacity: 1; }
+    .themeToggle input:not(:checked) ~ .sun { opacity: 1; }
     h1 {
       margin: 0;
-      font-family: "Gill Sans", "Trebuchet MS", "Segoe UI", sans-serif;
       font-size: 22px;
       letter-spacing: 0.4px;
     }
     .subtitle { margin: 0; color: var(--muted); font-size: 14px; }
     h2 {
       margin: 0 0 10px 0;
-      font-family: "Gill Sans", "Trebuchet MS", "Segoe UI", sans-serif;
       font-size: 16px;
       color: var(--accent-2);
       letter-spacing: 0.3px;
@@ -59,20 +111,21 @@
       box-shadow: var(--shadow);
       animation: fadeIn 0.6s ease-out;
     }
-    label { display:block; margin: 10px 0; }
+    label { display:block; margin: 10px 0; color: var(--ink); }
     input[type="text"], input[type="number"], select, textarea {
       width: 100%;
       max-width: 820px;
       padding: 10px 12px;
       border-radius: 12px;
-      border: 1px solid #d7d1c4;
-      background: #fffdf8;
+      border: 1px solid #cfe2e3;
+      background: var(--field-bg);
+      color: var(--ink);
       transition: border-color 0.2s ease, box-shadow 0.2s ease;
-      font-family: "Gill Sans", "Trebuchet MS", "Segoe UI", sans-serif;
+      font-family: inherit;
     }
     input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(234, 106, 79, 0.2);
+      box-shadow: var(--glow);
       outline: none;
     }
     textarea { min-height: 88px; font-family: "Courier New", Courier, monospace; }
@@ -80,105 +133,348 @@
     .muted { color: var(--muted); font-size: 13px; }
     .btns { display:flex; gap: 10px; align-items:center; margin-top: 12px; flex-wrap: wrap; }
     button {
-      padding: 9px 14px;
-      border-radius: 999px;
-      border: 1px solid #d7d1c4;
-      background: #fff7ea;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--field-bg);
       cursor:pointer;
-      font-family: "Gill Sans", "Trebuchet MS", "Segoe UI", sans-serif;
+      color: var(--button-text);
       letter-spacing: 0.2px;
       transition: transform 0.08s ease, box-shadow 0.2s ease, border-color 0.2s ease;
     }
-    button:hover { border-color: var(--accent); box-shadow: 0 6px 16px rgba(23, 27, 38, 0.12); }
+    button:hover { border-color: var(--accent); box-shadow: 0 6px 16px rgba(0, 64, 80, 0.12); }
     button:active { transform: translateY(1px); }
-    button.primary { border-color: var(--accent); background: #ffe8dd; }
-    button.danger { border-color:#b83b2f; background:#ffe7e4; }
+    button.primary { border-color: var(--accent); background: #dcfbfb; }
+    body[data-theme="dark"] button.primary { background: #1c3a43; }
+    button.danger { border-color:#b83b2f; background:#ffe7e4; color:#7a1f16; }
+    body[data-theme="dark"] button.danger { border-color:#d26b5e; background:#3a1e1a; color:#ffd4cc; }
     .status { margin-left: 10px; font-size: 13px; color:#0a7a34; }
-    code { background:#f1e9db; padding: 2px 6px; border-radius: 6px; }
+    body[data-theme="dark"] .status { color:#8fe0b0; }
+    code { background:#e6f3f4; padding: 2px 6px; border-radius: 6px; }
     .target {
-      border:1px dashed #d4c7b5;
+      border:1px dashed #c7e0e2;
       border-radius: 14px;
       padding: 14px;
       margin: 12px 0;
-      background: #fffaf0;
+      background: var(--field-bg);
     }
-    .targetHead { display:flex; align-items:center; justify-content:space-between; gap: 10px; flex-wrap: wrap; }
+    .targetHead {
+      display:grid;
+      grid-template-columns: 1fr auto;
+      align-items:center;
+      gap: 10px;
+    }
     .targetHead b { font-size: 14px; }
+    .targetTitle { display:flex; align-items:center; gap: 10px; flex-wrap: wrap; }
+    .targetActions { display:flex; gap:10px; align-items:center; flex-wrap: nowrap; }
+    .actionCtrl {
+      min-width: 96px;
+      height: 36px;
+      padding: 8px 12px;
+      border-radius: 12px;
+    }
+    select.actionCtrl { min-width: 96px; }
     .smallRow { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
     .pill {
       display:inline-block;
       padding:2px 8px;
       border-radius:999px;
-      border:1px solid #d7d1c4;
+      border:1px solid #cfe2e3;
       font-size:12px;
       color:#444;
-      background: #fffdf7;
+      background: var(--button-bg);
+    }
+    body[data-theme="dark"] .pill {
+      color: #cfe8ec;
+      background: var(--chip-bg);
+      border-color: #2a4954;
     }
     .serviceItem {
-      border:1px solid #e0d4c2;
+      border:1px solid #cfe2e3;
       border-radius: 12px;
       padding: 12px;
       margin: 10px 0;
-      background: #fffaf0;
+      background: var(--field-bg);
     }
+    .actionLine {
+      display:flex;
+      align-items:flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .actionLine label { margin: 0; display:flex; flex-direction:column; gap: 6px; }
+    .actionLine .grow { flex: 1; min-width: 240px; }
+    .actionLine .check { padding-bottom: 6px; flex-direction:row; align-items:center; gap: 8px; }
+    details.advanced {
+      margin-top: 10px;
+      border: 1px solid #d5e7e9;
+      border-radius: 12px;
+      background: var(--button-bg);
+      padding: 8px 12px;
+    }
+    details.advanced summary {
+      cursor: pointer;
+      color: var(--accent-2);
+      font-weight: 600;
+    }
+    details.advanced[open] summary { margin-bottom: 8px; }
+    .selectButton {
+      appearance: none;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--field-bg);
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+      max-width: 360px;
+      color: var(--button-text);
+    }
+    .selectButton.compact {
+      max-width: 220px;
+      min-width: 200px;
+      height: 36px;
+      padding: 8px 12px;
+      font-weight: 500;
+    }
+    .selectButton.modeSelect {
+      max-width: 200px;
+      min-width: 180px;
+      height: 36px;
+      padding: 8px 12px;
+      font-weight: 500;
+    }
+    .checkGrid {
+      display:grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .checkItem {
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--field-bg);
+      cursor: pointer;
+    }
+    .checkItem input { display:none; }
+    .checkBox {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      border: 2px solid var(--accent);
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      color: var(--accent);
+      font-size: 12px;
+    }
+    .checkItem input:checked + .checkBox::after {
+      content: "✓";
+      line-height: 1;
+    }
+    .triggerRow {
+      display:flex;
+      align-items:center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--field-bg);
+      flex-wrap: nowrap;
+    }
+    .triggerRow h2 { margin: 0; }
+    .triggerRow h2,
+    .triggerRow label,
+    .triggerRow .muted {
+      font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    }
+    .infoTip {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--button-bg);
+      color: var(--muted);
+      font-size: 12px;
+      cursor: help;
+      position: relative;
+    }
+    .infoTip::after {
+      content: attr(data-tip);
+      position: absolute;
+      top: 26px;
+      left: 50%;
+      transform: translateX(-50%);
+      white-space: nowrap;
+      background: var(--button-bg);
+      color: var(--ink);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 10px;
+      font-size: 12px;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+      z-index: 3;
+    }
+    .infoTip:hover::after { opacity: 1; }
+    .pillGroup {
+      display:flex;
+      gap: 6px;
+      align-items:center;
+      flex-wrap: wrap;
+    }
+    .pillButton {
+      border: 1px solid var(--border);
+      background: var(--button-bg);
+      color: var(--button-text);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .pillButton.active {
+      border-color: var(--accent);
+      box-shadow: var(--glow);
+    }
+    .timeoutInput {
+      width: 90px;
+      max-width: 90px;
+    }
+    .iconPicker {
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      white-space: nowrap;
+    }
+    .iconPreview {
+      width: 28px;
+      height: 28px;
+    }
+    .inlineActions { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; }
+    .badge {
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid #d2e5e7;
+      background: var(--chip-bg);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .badge.warn { border-color: #e7c9a4; color: #8a5a1f; background: #fff3e2; }
+    body[data-theme="dark"] .badge.warn { color: #ffd6a6; background: #3a2c1b; border-color: #6a4a28; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     @media (max-width: 760px) {
       .row { grid-template-columns: 1fr; }
       .page { padding: 0 14px; }
       .card, .hero { padding: 14px; }
+      .triggerRow { flex-wrap: wrap; }
+      .targetHead { grid-template-columns: 1fr; }
+      .targetActions { flex-wrap: wrap; }
     }
   </style>
 </head>
 <body>
   <div class="page">
     <div class="hero">
-      <h1>ON-AIR Meeting Trigger — Settings</h1>
+      <div class="heroTop">
+        <div class="heroLeft">
+          <h1>ON-AIR Meeting Trigger — Settings</h1>
+        </div>
+        <div class="heroRight">
+          <label class="themeToggle" id="theme_toggle">
+            <input type="checkbox" id="theme_switch" />
+            <span class="icon sun">☀︎</span>
+            <span class="icon moon">☾</span>
+          </label>
+        </div>
+      </div>
       <p class="subtitle">Design your meeting signals, services, and automations in one place.</p>
     </div>
 
     <div class="card">
-      <h2>Meeting Services</h2>
-      <label><input type="checkbox" id="svc_meet"> Google Meet (meet.google.com)</label>
-      <label><input type="checkbox" id="svc_teams"> Microsoft Teams (teams.microsoft.com)</label>
-      <label><input type="checkbox" id="svc_zoom"> Zoom (zoom.us / app.zoom.us)</label>
+      <div class="checkGrid">
+        <label class="checkItem">
+          <input type="checkbox" id="svc_meet">
+          <span class="checkBox"></span>
+          <span>Google Meet <span class="muted">(meet.google.com)</span></span>
+        </label>
+        <label class="checkItem">
+          <input type="checkbox" id="svc_teams">
+          <span class="checkBox"></span>
+          <span>Microsoft Teams <span class="muted">(teams.microsoft.com)</span></span>
+        </label>
+        <label class="checkItem">
+          <input type="checkbox" id="svc_zoom">
+          <span class="checkBox"></span>
+          <span>Zoom <span class="muted">(zoom.us / app.zoom.us)</span></span>
+        </label>
+      </div>
     </div>
 
     <div class="card">
-      <h2>Custom Services</h2>
-      <p class="muted">Add your own meeting service by URL prefix (include scheme, trailing slash recommended).</p>
-      <div class="btns">
-        <button id="add_custom_service">Add Custom Service</button>
+      <div class="triggerRow">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h2>Custom Services</h2>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <button id="add_custom_service" class="actionCtrl">Add</button>
+          <span class="muted">Add your own meeting service by URL prefix (include scheme, trailing slash recommended).</span>
+        </div>
       </div>
       <div id="custom_services"></div>
     </div>
 
     <div class="card">
-      <h2>Trigger Mode</h2>
-      <label><input type="radio" name="mode" value="ANY_TAB" id="mode_any"> Any matching tab exists (pre-join supported)</label>
-      <label><input type="radio" name="mode" value="ACTIVE_TAB" id="mode_active"> Only when a matching tab is active (focused)</label>
-    </div>
-
-    <div class="card">
-      <h2>HTTP Settings</h2>
-      <label>
-        Timeout (seconds)
-        <input type="number" id="http_timeout" min="1" max="20" step="1" value="3" />
-      </label>
-      <p class="muted">Applies to all targets.</p>
+      <div class="triggerRow">
+        <h2>Trigger Mode</h2>
+        <select id="mode_select" class="selectButton modeSelect">
+          <option value="ANY_TAB">Any matching tab</option>
+          <option value="ACTIVE_TAB">Only when tab is active</option>
+        </select>
+        <div class="pillGroup">
+          <span class="muted">Timeout (all targets)</span>
+          <button class="pillButton timeout-pill" data-val="1">1s</button>
+          <button class="pillButton timeout-pill" data-val="3">3s</button>
+          <button class="pillButton timeout-pill" data-val="5">5s</button>
+          <button class="pillButton timeout-pill" data-val="10">10s</button>
+          <input type="hidden" id="http_timeout" value="3" />
+        </div>
+        <label style="margin:0;" class="iconPicker">
+          Toolbar Icon
+          <img id="icon_preview" class="iconPreview" alt="Icon preview" src="icons/icon48.png" />
+          <select id="icon_mode" class="selectButton">
+            <option value="alwaysColor">Always color</option>
+            <option value="state">Color = ON / Gray = OFF</option>
+          </select>
+        </label>
+      </div>
     </div>
 
     <div class="card">
       <h2>Targets (LAN / local outputs)</h2>
-      <p class="muted">
-        Add any number of outputs: local listener, your LED sign, Tasmota, Shelly, etc.<br/>
-        You can use tokens: <code>{state}</code> <code>{service}</code> <code>{url}</code> <code>{ts}</code>
-      </p>
-
       <div class="btns">
-        <button id="add_listener">Add Listener</button>
-        <button id="add_led">Add Simple LED</button>
-        <button id="add_hook">Add HTTP Hook (Tasmota/etc.)</button>
+        <button id="add_hook">Add HTTP Hook</button>
+        <button id="add_listener">Add local Listener</button>
+        <select id="target_template" class="selectButton compact">
+          <option value="">Template: Select one…</option>
+          <option value="tasmota">Tasmota (GET)</option>
+          <option value="shelly">Shelly (GET)</option>
+          <option value="api_access">On-Air API</option>
+          <option value="ntfy">ntfy.sh</option>
+          <option value="home_assistant">Home Assistant Webhook</option>
+          <option value="json_post">Generic JSON (POST)</option>
+        </select>
+        <button id="add_template">Add from Template</button>
         <button id="export_hooks">Export Settings</button>
         <button id="import_hooks">Import Settings</button>
         <input type="file" id="import_hooks_file" accept="application/json" style="display:none" />
