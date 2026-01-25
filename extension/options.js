@@ -10,6 +10,9 @@ const DEFAULTS = {
 
 const DEFAULT_STATUS_CODES = [200, 202, 204];
 const KNOWN_STATUS_CODES = [200, 202, 204, 401, 403];
+const RETRY_MAX = 2;
+const RETRY_BASE_MS = 250;
+const RETRY_MAX_MS = 2000;
 const TEMPLATES = {
   tasmota: {
     label: "Tasmota (GET)",
@@ -813,6 +816,14 @@ function applyTemplate(str, vars) {
     .replaceAll("{ts}", String(vars.ts ?? ""));
 }
 
+function backoffMs(attempt) {
+  return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** attempt));
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function btoaSafe(s) {
   try { return btoa(s); } catch { return ""; }
 }
@@ -862,16 +873,20 @@ async function testAll(state) {
 }
 
 async function fetchWithTimeout(url, opts, timeoutMs, checkStatus = true) {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const r = await fetch(url, { ...opts, cache:"no-store", signal: ac.signal });
-    return checkStatus ? r.ok : true;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(t);
+  for (let attempt = 0; attempt <= RETRY_MAX; attempt++) {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      const r = await fetch(url, { ...opts, cache:"no-store", signal: ac.signal });
+      return checkStatus ? r.ok : true;
+    } catch {
+      if (attempt >= RETRY_MAX) return false;
+      await sleep(backoffMs(attempt));
+    } finally {
+      clearTimeout(t);
+    }
   }
+  return false;
 }
 
 async function testSingleTarget(t, vars, timeoutMs) {
@@ -927,17 +942,21 @@ async function testHttpHookTarget(t, vars, timeoutMs, state) {
 }
 
 async function fetchWithTimeoutResult(url, opts, timeoutMs) {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const r = await fetch(url, { ...opts, cache:"no-store", signal: ac.signal });
-    const text = await r.text().catch(() => "");
-    return { ok: r.ok, status: r.status, text, error: false };
-  } catch {
-    return { ok: false, status: 0, text: "", error: true };
-  } finally {
-    clearTimeout(t);
+  for (let attempt = 0; attempt <= RETRY_MAX; attempt++) {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      const r = await fetch(url, { ...opts, cache:"no-store", signal: ac.signal });
+      const text = await r.text().catch(() => "");
+      return { ok: r.ok, status: r.status, text, error: false };
+    } catch {
+      if (attempt >= RETRY_MAX) return { ok: false, status: 0, text: "", error: true };
+      await sleep(backoffMs(attempt));
+    } finally {
+      clearTimeout(t);
+    }
   }
+  return { ok: false, status: 0, text: "", error: true };
 }
 
 $("save").addEventListener("click", save);
