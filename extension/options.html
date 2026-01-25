@@ -19,6 +19,7 @@
       --button-bg: #f3fcfd;
       --button-text: #0c2430;
       --chip-bg: #e6f3f4;
+      --code-bg: #e6f3f4;
     }
     * { box-sizing: border-box; }
     body {
@@ -44,6 +45,7 @@
       --button-bg: #172a32;
       --button-text: #e7f3f5;
       --chip-bg: #1b3038;
+      --code-bg: #1b3038;
       background:
         radial-gradient(900px 420px at 8% 0%, rgba(53, 213, 213, 0.18) 0%, transparent 60%),
         radial-gradient(700px 360px at 92% 10%, rgba(0, 64, 80, 0.35) 0%, transparent 65%),
@@ -78,7 +80,7 @@
       display:inline-flex;
       align-items:center;
       gap: 8px;
-      border: 1px solid #cfe2e3;
+      border: 1px solid var(--border);
       background: var(--button-bg);
       color: var(--button-text);
       border-radius: 999px;
@@ -117,7 +119,7 @@
       max-width: 820px;
       padding: 10px 12px;
       border-radius: 12px;
-      border: 1px solid #cfe2e3;
+      border: 1px solid var(--border);
       background: var(--field-bg);
       color: var(--ink);
       transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -150,9 +152,9 @@
     body[data-theme="dark"] button.danger { border-color:#d26b5e; background:#3a1e1a; color:#ffd4cc; }
     .status { margin-left: 10px; font-size: 13px; color:#0a7a34; }
     body[data-theme="dark"] .status { color:#8fe0b0; }
-    code { background:#e6f3f4; padding: 2px 6px; border-radius: 6px; }
+    code { background: var(--code-bg); padding: 2px 6px; border-radius: 6px; }
     .target {
-      border:1px dashed #c7e0e2;
+      border:1px dashed var(--border);
       border-radius: 14px;
       padding: 14px;
       margin: 12px 0;
@@ -179,7 +181,7 @@
       display:inline-block;
       padding:2px 8px;
       border-radius:999px;
-      border:1px solid #cfe2e3;
+      border:1px solid var(--border);
       font-size:12px;
       color:#444;
       background: var(--button-bg);
@@ -190,7 +192,7 @@
       border-color: #2a4954;
     }
     .serviceItem {
-      border:1px solid #cfe2e3;
+      border:1px solid var(--border);
       border-radius: 12px;
       padding: 12px;
       margin: 10px 0;
@@ -207,7 +209,7 @@
     .actionLine .check { padding-bottom: 6px; flex-direction:row; align-items:center; gap: 8px; }
     details.advanced {
       margin-top: 10px;
-      border: 1px solid #d5e7e9;
+      border: 1px solid var(--border);
       border-radius: 12px;
       background: var(--button-bg);
       padding: 8px 12px;
@@ -364,7 +366,7 @@
       gap: 6px;
       padding: 4px 10px;
       border-radius: 999px;
-      border: 1px solid #d2e5e7;
+      border: 1px solid var(--border);
       background: var(--chip-bg);
       font-size: 12px;
       color: var(--muted);
@@ -392,7 +394,7 @@
         </div>
         <div class="heroRight">
           <label class="themeToggle" id="theme_toggle">
-            <input type="checkbox" id="theme_switch" />
+            <input type="checkbox" id="theme_switch" aria-label="Toggle dark theme" title="Toggle dark theme" />
             <span class="icon sun">☀︎</span>
             <span class="icon moon">☾</span>
           </label>
