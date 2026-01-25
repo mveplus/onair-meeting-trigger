@@ -117,7 +117,14 @@ const TEMPLATES = {
 };
 
 function $(id){ return document.getElementById(id); }
-function esc(s){ return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"); }
+function esc(s){
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll("\"","&quot;")
+    .replaceAll("'","&#39;");
+}
 function trimSlash(s){ return (s || "").replace(/\/+$/, ""); }
 function newId(prefix="t"){ return `${prefix}_${Math.random().toString(16).slice(2,10)}`; }
 
