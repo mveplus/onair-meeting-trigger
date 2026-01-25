@@ -4,13 +4,41 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { font-family: system-ui, sans-serif; margin: 12px; min-width: 280px; }
+    :root {
+      --ink: #0c2430;
+      --muted: #586a72;
+      --pill-bg: #f5f5f5;
+      --pill-border: #c2d0d6;
+      --pill-on-bg: #e9ffff;
+      --pill-on-border: #0aa;
+      --btn-bg: #fafafa;
+      --btn-border: #c2d0d6;
+      --surface: #ffffff;
+    }
+    body[data-theme="dark"] {
+      --ink: #e7f3f5;
+      --muted: #9fb5bb;
+      --pill-bg: #1a2a31;
+      --pill-border: #2a4954;
+      --pill-on-bg: #193a42;
+      --pill-on-border: #35d5d5;
+      --btn-bg: #172a32;
+      --btn-border: #2a4954;
+      --surface: #0f1f25;
+    }
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 12px;
+      min-width: 280px;
+      color: var(--ink);
+      background: var(--surface);
+    }
     .row { display:flex; justify-content:space-between; align-items:center; margin: 8px 0; }
-    .pill { padding: 4px 10px; border-radius: 999px; border: 1px solid #ccc; }
-    .on { background:#e9ffff; border-color:#0aa; }
-    .off { background:#f5f5f5; }
-    .muted { color:#666; font-size: 12px; margin-top: 8px; }
-    button { padding: 6px 10px; border-radius: 10px; border: 1px solid #ccc; background: #fafafa; cursor: pointer; }
+    .pill { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--pill-border); background: var(--pill-bg); }
+    .on { background: var(--pill-on-bg); border-color: var(--pill-on-border); }
+    .off { background: var(--pill-bg); }
+    .muted { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    button { padding: 6px 10px; border-radius: 10px; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--ink); cursor: pointer; }
   </style>
 </head>
 <body>
