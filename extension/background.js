@@ -44,6 +44,10 @@ const ICONS_GRAY = {
   128: "icons/icon128_gray.png"
 };
 
+const RETRY_MAX = 2;
+const RETRY_BASE_MS = 250;
+const RETRY_MAX_MS = 2000;
+
 let current = { state: "OFF", service: null, url: null, ts: Date.now() };
 let debounceTimer = null;
 let debugEnabled = false;
@@ -232,21 +236,35 @@ function applyTemplate(str, vars) {
     .replaceAll("{ts}", String(vars.ts ?? ""));
 }
 
+function backoffMs(attempt) {
+  return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** attempt));
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function callUrl(url, timeoutSec, fetchOpts = {}) {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), Math.max(1, timeoutSec) * 1000);
-  try {
-    const r = await fetch(url, {
-      method: fetchOpts.method || "GET",
-      headers: fetchOpts.headers || undefined,
-      body: fetchOpts.body || undefined,
-      cache: "no-store",
-      signal: ac.signal
-    });
-    return { ok: r.ok, status: r.status };
-  } finally {
-    clearTimeout(t);
+  for (let attempt = 0; attempt <= RETRY_MAX; attempt++) {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), Math.max(1, timeoutSec) * 1000);
+    try {
+      const r = await fetch(url, {
+        method: fetchOpts.method || "GET",
+        headers: fetchOpts.headers || undefined,
+        body: fetchOpts.body || undefined,
+        cache: "no-store",
+        signal: ac.signal
+      });
+      return { ok: r.ok, status: r.status, error: false };
+    } catch {
+      if (attempt >= RETRY_MAX) return { ok: false, status: 0, error: true };
+      await sleep(backoffMs(attempt));
+    } finally {
+      clearTimeout(t);
+    }
   }
+  return { ok: false, status: 0, error: true };
 }
 
 async function setToolbarIcon(state, cfg) {
