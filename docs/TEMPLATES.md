@@ -18,6 +18,7 @@ Templates are preset **HTTP Hook targets** that fill common ON/OFF URL, method, 
 - Home Assistant Webhook
 - Generic JSON (POST)
 - OnAir Cloud Bridge (AWS IoT Lambda)
+- OnAir Cloud Bridge — Breathing (AWS IoT Lambda)
 
 ### OnAir Cloud Bridge — quick setup
 
@@ -37,9 +38,24 @@ template needs no body templating — just three values to fill in:
 | `YOUR_THING` | AWS IoT Thing name | e.g. `onair-test-1` — must be in the Lambda's `ALLOWED_THINGS` env var |
 | `REPLACE_WITH_TOKEN` | bearer token | contents of `.onair-bridge-token` next to the deploy script |
 
-`matchOn` / `matchOff` are pre-set to `"mode":1` / `"mode":0` so the
-hook can verify the round-trip reached the Lambda, not just any HTTP
-2xx.
+`matchOn` / `matchOff` are pre-set to the exact `"mode":N` substring
+the Lambda echoes back, so the hook can verify the round-trip
+actually reached the Lambda rather than just any HTTP 2xx.
+
+#### Solid vs Breathing variants
+
+There are two templates that share the same Lambda, differing only in
+what the "ON" action does:
+
+| Template | ON mode | OFF mode | Use when… |
+|---|---|---|---|
+| **OnAir Cloud Bridge (AWS IoT Lambda)** | `mode=1` (solid on) | `mode=0` (off) | You want the sign to stay solid for the duration of the meeting. |
+| **OnAir Cloud Bridge — Breathing (AWS IoT Lambda)** | `mode=2` (breathing) | `mode=0` (off) | You prefer a softer pulsing pattern during meetings. |
+
+You can also have **both** active at once (use Add HTTP Hook twice and
+pick a different template each time) if you want, say, the bedroom
+sign to pulse and the office sign to stay solid for the same meeting
+event.
 
 ## Template placeholders
 
