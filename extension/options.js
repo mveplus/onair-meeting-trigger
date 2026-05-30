@@ -1026,8 +1026,30 @@ $("add_custom_service").addEventListener("click", addCustomService);
 $("add_template").addEventListener("click", () => {
   const key = $("target_template").value;
   if (!key) return showStatus("Pick a template first", false);
-  addTarget("httpHook", key);
+  if (!TEMPLATES[key]) return showStatus(`Unknown template '${key}'`, false);
+  // Templates may carry a `target.type` other than httpHook (e.g.
+  // iotHybrid). Route through addTarget with the template's own type so
+  // the right add-branch picks up its fields.
+  const tplType = TEMPLATES[key].target?.type || "httpHook";
+  addTarget(tplType, key);
 });
+
+// Build the template <select> from the TEMPLATES object so that adding
+// a new entry is a single-file change in options.js. Placeholder
+// <option> stays in the static markup; everything below it is
+// regenerated here at load time.
+function populateTemplateDropdown() {
+  const sel = $("target_template");
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Template: Select one…</option>';
+  for (const [key, def] of Object.entries(TEMPLATES)) {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = def.label || key;
+    sel.appendChild(opt);
+  }
+}
+populateTemplateDropdown();
 
 $("export_hooks").addEventListener("click", exportHooks);
 $("import_hooks").addEventListener("click", () => $("import_hooks_file").click());

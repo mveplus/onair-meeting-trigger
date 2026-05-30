@@ -469,14 +469,9 @@
         <button id="add_listener">Add local Listener</button>
         <select id="target_template" class="selectButton compact">
           <option value="">Template: Select one…</option>
-          <option value="tasmota">Tasmota (GET)</option>
-          <option value="shelly">Shelly (GET)</option>
-          <option value="api_access">On-Air API</option>
-          <option value="ntfy">ntfy.sh</option>
-          <option value="home_assistant">Home Assistant Webhook</option>
-          <option value="json_post">Generic JSON (POST)</option>
-          <option value="aws_iot_lambda">OnAir Cloud Bridge (AWS IoT Lambda)</option>
-          <option value="aws_iot_lambda_breathing">OnAir Cloud Bridge — Breathing (AWS IoT Lambda)</option>
+          <!-- Entries are appended at runtime by populateTemplateDropdown()
+               in options.js, so the JS TEMPLATES object is the single
+               source of truth for the dropdown contents. -->
         </select>
         <button id="add_template">Add from Template</button>
         <button id="export_hooks">Export Settings</button>
