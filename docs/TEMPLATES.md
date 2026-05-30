@@ -67,6 +67,29 @@ Templates include placeholders that you should replace:
 - `API_ID` → API Gateway HTTP API id (AWS IoT Lambda)
 - `http://device.local` → your device hostname or IP
 
+## Heads-up: `*.local` (mDNS) in MV3 service workers
+
+The local **On-Air API** template defaults to `http://device.local/...`,
+which **resolves fine from the shell** (`curl`, `getent`) but generally
+**does not work from inside the extension's service worker** on
+Linux — Chromium's network-service resolver doesn't fall through to
+mDNS / Avahi the way `glibc`'s NSS does. Toggling
+`chrome://flags/#async-dns` and granting `http://*.local/*` site
+access don't reliably fix it.
+
+The boring-but-reliable fix is to give the device a fixed IP via a
+DHCP reservation on your router (MAC → IP) and point the hook at the
+IP instead of `.local`:
+
+```text
+ON URL : http://10.37.22.98/api/set?state=1
+OFF URL: http://10.37.22.98/api/set?state=0
+```
+
+Or, if you don't want to depend on the LAN path at all, use one of
+the **OnAir Cloud Bridge** templates below — it goes over HTTPS to an
+AWS API Gateway and has no name-resolution dependency.
+
 ## Tokens supported in URLs and bodies
 
 You can use these in HTTP Hook URLs or bodies:
