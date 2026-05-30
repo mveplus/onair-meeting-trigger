@@ -42,6 +42,22 @@ jobs:
           chmod +x scripts/build-zip.sh
           scripts/build-zip.sh
 
+      - name: Replace existing release if one is already there
+        # softprops/action-gh-release fails with "Cannot upload assets to
+        # an immutable release" when a published release already exists
+        # for the tag (e.g. after re-running the workflow on the same
+        # tag). Delete it first so the next step can recreate it cleanly.
+        # The tag itself is left intact.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Found existing release for $GITHUB_REF_NAME, deleting so the next step can recreate it."
+            gh release delete "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --yes
+          else
+            echo "No existing release for $GITHUB_REF_NAME, nothing to delete."
+          fi
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2.2.2
         with:
