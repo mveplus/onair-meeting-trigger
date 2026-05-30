@@ -113,6 +113,33 @@ const TEMPLATES = {
       matchOn: "",
       matchOff: ""
     }
+  },
+  aws_iot_lambda: {
+    // Cloud bridge for the OnAir LED sign over AWS IoT.
+    // The companion Lambda is in onair-led-sign-firmware →
+    // scripts/cloud-bridge/. It validates a bearer token, reads
+    // `thing` and `mode` from the query string (so this template
+    // doesn't need any body templating), and publishes
+    // {"mode": N} on the device's onair/<thing>/cmd topic.
+    // Replace API_ID, YOUR_THING, and REPLACE_WITH_TOKEN below.
+    label: "OnAir Cloud Bridge (AWS IoT Lambda)",
+    target: {
+      type: "httpHook",
+      onUrl:  "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=1",
+      offUrl: "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=0",
+      method: "POST",
+      headers: [
+        { key: "Authorization", value: "Bearer REPLACE_WITH_TOKEN" }
+      ],
+      body: "",
+      basicAuth: null,
+      checkStatus: true,
+      statusCodes: [...DEFAULT_STATUS_CODES],
+      // Lambda returns json.dumps with default (no-space) separators,
+      // so match on the exact substring it emits per state.
+      matchOn:  "\"mode\":1",
+      matchOff: "\"mode\":0"
+    }
   }
 };
 
