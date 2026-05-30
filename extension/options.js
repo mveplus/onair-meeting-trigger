@@ -271,6 +271,16 @@ function getOriginsFromTargets(cfg) {
       if (t.onUrl) urls.push(t.onUrl);
       if (t.offUrl) urls.push(t.offUrl);
     }
+    if (t.type === "iotHybrid") {
+      // Both halves of the hybrid speak HTTP from background.js — the
+      // user has to grant host permission for both origins or the
+      // fetch fails with the "No Access-Control-Allow-Origin"
+      // pre-flight error you only see on the FIRST event after a
+      // fresh import/add. The trailing "/" makes the URL parseable
+      // even when the base hasn't been filled in yet.
+      if (t.localBase) urls.push(t.localBase + "/");
+      if (t.cloudBase) urls.push(t.cloudBase + "/");
+    }
   }
   return urls;
 }
@@ -721,6 +731,22 @@ async function testTargetNode(node, t, state) {
   const cfg = window.__cfg || DEFAULTS;
   const target = buildTargetFromNode(node, t);
   target.enabled = true;
+
+  // Request host permission for every URL this target would hit
+  // BEFORE we call fetch. Otherwise the first Test on a freshly
+  // imported / freshly added row gets blocked at the CORS preflight
+  // because the origin isn't in the extension's granted set. Going
+  // through ensureHostPermissionFor here means each Test click is
+  // a user gesture that can pop the permission dialog — background
+  // event-driven calls can't request permissions, so the Test
+  // button is the natural "first-touch" grant moment alongside Save.
+  for (const url of getOriginsFromTargets({ targets: [target] })) {
+    const granted = await ensureHostPermissionFor(url);
+    if (!granted) {
+      return showStatus(`Permission denied for ${url}`, false);
+    }
+  }
+
   const vars = { state, service: "test", url: "", ts: Date.now() };
   const timeoutMs = Math.max(1, Math.min(20, parseInt($("http_timeout").value || "3", 10))) * 1000;
   const res = await testSingleTarget(target, vars, timeoutMs);
