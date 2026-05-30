@@ -321,6 +321,27 @@ function normalizeTarget(raw) {
       verifyStatus: !!raw?.verifyStatus
     };
   }
+  if (type === "iotHybrid") {
+    const localBase = trimSlash(String(raw?.localBase || "").trim());
+    const cloudBase = trimSlash(String(raw?.cloudBase || "").trim());
+    // Either path must carry SOMETHING — a row with no local and no
+    // cloud URL is meaningless and we drop it silently rather than
+    // import a no-op.
+    if (!localBase && !cloudBase) return null;
+    return {
+      id: newId("iot"),
+      type: "iotHybrid",
+      enabled: raw?.enabled !== false,
+      localBase,
+      localToken: String(raw?.localToken || ""),
+      cloudBase,
+      cloudToken: String(raw?.cloudToken || ""),
+      thing: String(raw?.thing || ""),
+      modeOn: Number.isFinite(+raw?.modeOn) ? +raw.modeOn : 1,
+      modeOff: Number.isFinite(+raw?.modeOff) ? +raw.modeOff : 0,
+      localTimeoutMs: Math.max(100, Math.min(10000, Number(raw?.localTimeoutMs) || 1500))
+    };
+  }
   if (type === "httpHook") {
     const onUrl = String(raw?.onUrl || "").trim();
     const offUrl = String(raw?.offUrl || "").trim();
@@ -852,6 +873,20 @@ function exportHooks() {
         type: "simpleLed",
         baseUrl: t.baseUrl || "",
         verifyStatus: !!t.verifyStatus,
+        enabled: t.enabled !== false
+      };
+    }
+    if (t.type === "iotHybrid") {
+      return {
+        type: "iotHybrid",
+        localBase: t.localBase || "",
+        localToken: t.localToken || "",
+        cloudBase: t.cloudBase || "",
+        cloudToken: t.cloudToken || "",
+        thing: t.thing || "",
+        modeOn: Number.isFinite(+t.modeOn) ? +t.modeOn : 1,
+        modeOff: Number.isFinite(+t.modeOff) ? +t.modeOff : 0,
+        localTimeoutMs: Math.max(100, Math.min(10000, Number(t.localTimeoutMs) || 1500)),
         enabled: t.enabled !== false
       };
     }
