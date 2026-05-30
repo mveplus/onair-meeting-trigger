@@ -64,6 +64,36 @@ Config includes:
 - Optional Basic Auth (`user:pass`)
 - Optional status checks (allowed status codes + response-body match)
 
+### 4) IoT (local + cloud) target — local-first with AWS IoT fallback
+A single target row that tries the device's local HTTP API first
+(~30 ms on your home Wi-Fi) and **transparently falls back to an AWS
+IoT MQTT publish** when local is unreachable — laptop closed at
+home, you on a train, devices on a guest network, etc. Exactly one
+command per meeting event reaches the device.
+
+Config includes:
+- Local base URL + `X-API-Token` (the device's existing on-LAN API)
+- Cloud endpoint URL + bearer token (your own API Gateway + Lambda)
+- AWS IoT thing name
+- ON mode / OFF mode mapping (0=off, 1=on, 2=breathing) — same row
+  drives either solid-on or breathing during meetings without
+  spawning a sibling target
+- Local timeout (ms) before falling over to cloud (default 1500 ms)
+
+Token fields are masked (`type="password"`) in the UI to keep
+secrets off the screen during screen-shares.
+
+The companion Lambda + API Gateway scaffold for the cloud half lives
+in the firmware repo at
+[`onair-led-sign-firmware/scripts/cloud-bridge/`](https://github.com/mveplus/onair-led-sign-firmware/tree/main/scripts/cloud-bridge);
+one `deploy.sh` script provisions the IAM role, Lambda, and API
+Gateway and prints the endpoint URL + bearer token to paste into
+this target.
+
+Use the **OnAir IoT — local first, AWS fallback** template from the
+template dropdown to get a row pre-shaped with the right field
+layout and mode defaults (1 / 0).
+
 #### Tasmota example
 Turn a Tasmota relay on/off via HTTP:
 
@@ -176,6 +206,15 @@ These will send requests to every enabled target.
 ---
 
 ## Changelog (local)
+
+### AWS IoT Cloud Bridge + `iotHybrid` target (v0.3.0)
+- New target type **IoT (local + cloud)** with local-first + AWS IoT MQTT fallback semantics
+- Three new templates: **OnAir Cloud Bridge (AWS IoT Lambda)** (solid), the breathing sibling, and **OnAir IoT — local first, AWS fallback** (the hybrid)
+- Template dropdown now generated from the `TEMPLATES` object at runtime
+- iotHybrid round-trips cleanly through Export / Import Settings
+- Token fields in the iotHybrid row are masked in the UI
+- Host permission requested for iotHybrid local/cloud URLs both on **Save** and on per-row **Test ON/OFF** click (eliminates the misleading "CORS policy" error on first fetch after a fresh import)
+- Heads-up about `*.local` mDNS not resolving from MV3 service workers on Linux — recommend an IP + DHCP reservation for the local hook, or use the cloud-bridge templates that sidestep name resolution entirely
 
 ### Universal Targets update
 - Added multi-target outputs (Listener / Simple LED / HTTP Hook)

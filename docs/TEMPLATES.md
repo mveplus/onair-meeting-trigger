@@ -19,6 +19,7 @@ Templates are preset **HTTP Hook targets** that fill common ON/OFF URL, method, 
 - Generic JSON (POST)
 - OnAir Cloud Bridge (AWS IoT Lambda)
 - OnAir Cloud Bridge — Breathing (AWS IoT Lambda)
+- OnAir IoT — local first, AWS fallback
 
 ### OnAir Cloud Bridge — quick setup
 
@@ -56,6 +57,39 @@ You can also have **both** active at once (use Add HTTP Hook twice and
 pick a different template each time) if you want, say, the bedroom
 sign to pulse and the office sign to stay solid for the same meeting
 event.
+
+### Local-first hybrid
+
+`OnAir IoT — local first, AWS fallback` is a **single-row** target
+(type `iotHybrid`, not `httpHook`) that does what two parallel hooks
+can't: try local first, fall back to cloud only if local is
+unreachable inside a per-row timeout. Exactly one command reaches the
+device per meeting event — no duplicate publishes.
+
+When to pick this over the cloud-only templates above:
+
+- You're on home Wi-Fi most of the time and want the snappy
+  on-LAN response, **but** you also want it to "just work" when you're
+  off-LAN without manually switching configs.
+- You want one row per sign instead of two (`local` + `cloud`)
+  with the indistinguishable Test buttons.
+
+The template seeds **empty** string fields so a fresh Export Settings
+file never carries `REPLACE_WITH_*` placeholders by accident — fill
+in the row's UI and Save, then Export gives you real values.
+
+Fields:
+
+| Field | What to put | Source |
+|---|---|---|
+| Local base URL | IP of the device on your LAN | `http://10.37.22.98` — recommend a DHCP reservation so it doesn't drift |
+| Local API token | The device's `X-API-Token` value | Same one you'd use in the On-Air API template |
+| Cloud endpoint URL | API Gateway HTTP API endpoint | `aws apigatewayv2 get-apis ... --output text` from the firmware repo |
+| Cloud bearer token | The shared bearer | Contents of `.onair-bridge-token` from the firmware repo's `scripts/cloud-bridge/deploy.sh` run |
+| AWS IoT thing | The Thing name | Must be in the Lambda's `ALLOWED_THINGS` env var |
+| ON mode | `0` off / `1` on / `2` breathing | `1` for solid, `2` for breathing |
+| OFF mode | `0` off (typical) | `0` |
+| Local timeout (ms) | How long to wait before fallover | `1500` is a sensible default |
 
 ## Template placeholders
 

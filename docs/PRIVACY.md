@@ -20,6 +20,7 @@ The extension may send HTTP requests **only to network endpoints explicitly conf
 - Home Assistant
 - Local IoT devices (e.g. Tasmota, Shelly, ESP-based devices)
 - User-owned local webhooks or scripts
+- **User-owned cloud endpoints** the user has deployed in their own AWS account (e.g. an API Gateway + Lambda that publishes to AWS IoT MQTT, as scaffolded by the companion firmware repo's `scripts/cloud-bridge/` deployment helper). The developer of this extension has **no access** to this infrastructure — the user owns the AWS account, the Lambda code, the bearer token, and the cost of every invocation.
 
 These requests are initiated solely for the purpose of signaling meeting state (ON/OFF).
 
