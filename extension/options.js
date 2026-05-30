@@ -140,6 +140,29 @@ const TEMPLATES = {
       matchOn:  "\"mode\":1",
       matchOff: "\"mode\":0"
     }
+  },
+  aws_iot_lambda_breathing: {
+    // Same cloud bridge as aws_iot_lambda above, but the "ON" action
+    // triggers breathing mode (mode=2) instead of solid on (mode=1).
+    // Pick this template if you'd rather the sign pulse during
+    // meetings than stay solid — the OFF action is still mode=0,
+    // so the meeting-ended flow returns the sign to dark either way.
+    label: "OnAir Cloud Bridge — Breathing (AWS IoT Lambda)",
+    target: {
+      type: "httpHook",
+      onUrl:  "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=2",
+      offUrl: "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=0",
+      method: "POST",
+      headers: [
+        { key: "Authorization", value: "Bearer REPLACE_WITH_TOKEN" }
+      ],
+      body: "",
+      basicAuth: null,
+      checkStatus: true,
+      statusCodes: [...DEFAULT_STATUS_CODES],
+      matchOn:  "\"mode\":2",
+      matchOff: "\"mode\":0"
+    }
   }
 };
 
