@@ -163,6 +163,26 @@ const TEMPLATES = {
       matchOn:  "\"mode\":2",
       matchOff: "\"mode\":0"
     }
+  },
+  aws_iot_hybrid: {
+    // Local-first hybrid: tries the device's local HTTP API first
+    // (~30 ms on LAN) and falls back to the AWS IoT cloud bridge on
+    // failure or timeout. This is the single-row equivalent of
+    // enabling both "On-Air API" and "OnAir Cloud Bridge" in
+    // parallel, but with proper fall-through semantics so the device
+    // receives exactly one command per event.
+    label: "OnAir IoT — local first, AWS fallback",
+    target: {
+      type: "iotHybrid",
+      localBase: "http://REPLACE_WITH_DEVICE_IP",
+      localToken: "REPLACE_WITH_DEVICE_TOKEN",
+      cloudBase: "https://API_ID.execute-api.eu-west-1.amazonaws.com",
+      cloudToken: "REPLACE_WITH_BEARER_TOKEN",
+      thing: "YOUR_THING",
+      modeOn: 1,
+      modeOff: 0,
+      localTimeoutMs: 1500
+    }
   }
 };
 
@@ -410,6 +430,7 @@ function renderTargets(cfg) {
   (cfg.targets || []).forEach((t, idx) => {
     const typeLabel = t.type === "listener" ? "Listener"
       : t.type === "simpleLed" ? "Simple LED"
+      : t.type === "iotHybrid" ? "IoT (local + cloud)"
       : "HTTP";
 
     const div = document.createElement("div");
@@ -464,6 +485,53 @@ function renderTargets(cfg) {
             <label style="margin-top:30px;"><input type="checkbox" class="t_verify" ${t.verifyStatus ? "checked":""}> Verify using <code>/led/status</code></label>
           </div>
         </div>
+      `;
+    } else if (t.type === "iotHybrid") {
+      const modeOpts = [[0, "off"], [1, "on"], [2, "breathing"]];
+      const modeOn = Number(t.modeOn ?? 1);
+      const modeOff = Number(t.modeOff ?? 0);
+      body.innerHTML = `
+        <div class="row">
+          <div>
+            <label>Local base URL
+              <input type="text" class="t_localBase" placeholder="http://10.37.22.98" value="${esc(t.localBase || "")}">
+            </label>
+            <label>Local API token (<code>X-API-Token</code>)
+              <input type="text" class="t_localToken" placeholder="device API token" value="${esc(t.localToken || "")}">
+            </label>
+          </div>
+          <div>
+            <label>Cloud endpoint URL
+              <input type="text" class="t_cloudBase" placeholder="https://API_ID.execute-api.eu-west-1.amazonaws.com" value="${esc(t.cloudBase || "")}">
+            </label>
+            <label>Cloud bearer token (<code>Authorization</code>)
+              <input type="text" class="t_cloudToken" placeholder="bearer token" value="${esc(t.cloudToken || "")}">
+            </label>
+          </div>
+        </div>
+        <label>AWS IoT thing
+          <input type="text" class="t_thing" placeholder="onair-test-1" value="${esc(t.thing || "")}">
+        </label>
+        <div class="row">
+          <div>
+            <label>ON mode
+              <select class="t_modeOn">
+                ${modeOpts.map(([v, lbl]) => `<option value="${v}" ${v===modeOn?"selected":""}>${v} (${lbl})</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          <div>
+            <label>OFF mode
+              <select class="t_modeOff">
+                ${modeOpts.map(([v, lbl]) => `<option value="${v}" ${v===modeOff?"selected":""}>${v} (${lbl})</option>`).join("")}
+              </select>
+            </label>
+          </div>
+        </div>
+        <label>Local timeout before cloud fallback (ms)
+          <input type="number" class="t_localTimeoutMs" min="100" max="10000" value="${Number(t.localTimeoutMs ?? 1500)}">
+        </label>
+        <div class="muted">On every event, the extension fires <em>one</em> request to the local API (no retries, single fetch inside the timeout above). If it doesn't return 2xx in time, the cloud endpoint takes over. Exactly one of the two paths actually flips the sign per event — no duplicate commands.</div>
       `;
     } else {
       // httpHook
@@ -541,6 +609,14 @@ function validateTargetNode(node, t) {
   } else if (t.type === "simpleLed") {
     const base = node.querySelector(".t_baseUrl")?.value.trim() || "";
     if (!base) warnings.push("LED base URL is empty");
+  } else if (t.type === "iotHybrid") {
+    const localBase = node.querySelector(".t_localBase")?.value.trim() || "";
+    const cloudBase = node.querySelector(".t_cloudBase")?.value.trim() || "";
+    if (!localBase && !cloudBase) warnings.push("Set Local base URL and/or Cloud endpoint URL");
+    if (cloudBase) {
+      if (!node.querySelector(".t_thing")?.value.trim()) warnings.push("Cloud endpoint needs an AWS IoT thing name");
+      if (!node.querySelector(".t_cloudToken")?.value.trim()) warnings.push("Cloud endpoint set but bearer token is empty");
+    }
   } else {
     const onUrl = node.querySelector(".t_onUrl")?.value.trim() || "";
     const offUrl = node.querySelector(".t_offUrl")?.value.trim() || "";
@@ -558,6 +634,16 @@ function buildTargetFromNode(node, t) {
   } else if (t.type === "simpleLed") {
     base.baseUrl = trimSlash(node.querySelector(".t_baseUrl")?.value.trim() || "");
     base.verifyStatus = !!node.querySelector(".t_verify")?.checked;
+  } else if (t.type === "iotHybrid") {
+    base.localBase = trimSlash(node.querySelector(".t_localBase")?.value.trim() || "");
+    base.localToken = node.querySelector(".t_localToken")?.value.trim() || "";
+    base.cloudBase = trimSlash(node.querySelector(".t_cloudBase")?.value.trim() || "");
+    base.cloudToken = node.querySelector(".t_cloudToken")?.value.trim() || "";
+    base.thing = node.querySelector(".t_thing")?.value.trim() || "";
+    base.modeOn = parseInt(node.querySelector(".t_modeOn")?.value || "1", 10);
+    base.modeOff = parseInt(node.querySelector(".t_modeOff")?.value || "0", 10);
+    base.localTimeoutMs = Math.max(100, Math.min(10000,
+      parseInt(node.querySelector(".t_localTimeoutMs")?.value || "1500", 10)));
   } else {
     base.onUrl = node.querySelector(".t_onUrl")?.value.trim() || "";
     base.offUrl = node.querySelector(".t_offUrl")?.value.trim() || "";
@@ -683,6 +769,21 @@ function addTarget(type, templateKey = "") {
       enabled: true,
       baseUrl: "",
       verifyStatus: false
+    });
+  } else if (type === "iotHybrid") {
+    const tpl = templateKey && TEMPLATES[templateKey] ? TEMPLATES[templateKey].target : null;
+    cfg.targets.push({
+      id: newId("iot"),
+      type: "iotHybrid",
+      enabled: true,
+      localBase: tpl?.localBase || "",
+      localToken: tpl?.localToken || "",
+      cloudBase: tpl?.cloudBase || "",
+      cloudToken: tpl?.cloudToken || "",
+      thing: tpl?.thing || "",
+      modeOn: tpl?.modeOn ?? 1,
+      modeOff: tpl?.modeOff ?? 0,
+      localTimeoutMs: tpl?.localTimeoutMs ?? 1500
     });
   } else {
     const key = templateKey && TEMPLATES[templateKey] ? templateKey : "tasmota";
@@ -970,6 +1071,33 @@ async function testSingleTarget(t, vars, timeoutMs) {
     if (!base) return false;
     const url = base + (vars.state === "ON" ? "/led/on" : "/led/off");
     return fetchWithTimeout(url, { method:"GET" }, timeoutMs);
+  }
+  if (t.type === "iotHybrid") {
+    const mode = vars.state === "ON"
+      ? (Number.isFinite(+t.modeOn) ? +t.modeOn : 1)
+      : (Number.isFinite(+t.modeOff) ? +t.modeOff : 0);
+
+    // Local probe — single fetch, no retries, capped by t_localTimeoutMs.
+    if (t.localBase) {
+      const localTimeout = Math.max(100, Math.min(10000, Number(t.localTimeoutMs) || 1500));
+      try {
+        const ac = new AbortController();
+        const to = setTimeout(() => ac.abort(), localTimeout);
+        const headers = new Headers();
+        if (t.localToken) headers.set("X-API-Token", t.localToken);
+        const r = await fetch(`${trimSlash(t.localBase)}/api/set?state=${mode}`,
+          { method: "GET", headers, cache: "no-store", signal: ac.signal });
+        clearTimeout(to);
+        if (r.ok) return true;
+      } catch (_) { /* fall through to cloud */ }
+    }
+
+    // Cloud fallback.
+    if (!t.cloudBase || !t.thing) return false;
+    const cloudHeaders = new Headers();
+    if (t.cloudToken) cloudHeaders.set("Authorization", `Bearer ${t.cloudToken}`);
+    const cloudUrl = `${trimSlash(t.cloudBase)}/?thing=${encodeURIComponent(t.thing)}&mode=${mode}`;
+    return fetchWithTimeout(cloudUrl, { method: "POST", headers: cloudHeaders }, timeoutMs);
   }
   return testHttpHookTarget(t, vars, timeoutMs, vars.state);
 }

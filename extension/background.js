@@ -131,6 +131,16 @@ function migrateConfig(config) {
           ? { user: String(tt.basicAuth.user ?? ""), pass: String(tt.basicAuth.pass ?? "") }
           : null;
       }
+      if (tt.type === "iotHybrid") {
+        tt.localBase = trimSlash(tt.localBase || "");
+        tt.localToken = String(tt.localToken || "");
+        tt.cloudBase = trimSlash(tt.cloudBase || "");
+        tt.cloudToken = String(tt.cloudToken || "");
+        tt.thing = String(tt.thing || "");
+        tt.modeOn = Number.isFinite(+tt.modeOn) ? +tt.modeOn : 1;
+        tt.modeOff = Number.isFinite(+tt.modeOff) ? +tt.modeOff : 0;
+        tt.localTimeoutMs = Math.max(100, Math.min(10000, Number(tt.localTimeoutMs) || 1500));
+      }
       return tt;
     });
 
@@ -359,6 +369,47 @@ async function runHttpHookTarget(target, vars, timeoutSec) {
   await callUrl(url, timeoutSec, { method, headers, body }).catch(() => {});
 }
 
+// Local-first hybrid: tries the device's local HTTP API first with a
+// short per-row timeout and no retries, then falls back to the AWS IoT
+// cloud bridge. Either path flips the sign — exactly one fires per
+// event under normal conditions.
+async function runIotHybridTarget(target, vars, timeoutSec) {
+  if (!target?.enabled) return;
+  const mode = vars.state === "ON"
+    ? (Number.isFinite(+target.modeOn) ? +target.modeOn : 1)
+    : (Number.isFinite(+target.modeOff) ? +target.modeOff : 0);
+
+  // 1. Local probe (single fetch, no retries — the meeting state just
+  //    changed and we want either an instant success or a quick fall
+  //    through to cloud).
+  if (target.localBase) {
+    const localTimeoutMs = Math.max(100, Math.min(10000, Number(target.localTimeoutMs) || 1500));
+    const ac = new AbortController();
+    const to = setTimeout(() => ac.abort(), localTimeoutMs);
+    try {
+      const headers = new Headers();
+      if (target.localToken) headers.set("X-API-Token", target.localToken);
+      const r = await fetch(
+        `${trimSlash(target.localBase)}/api/set?state=${mode}`,
+        { method: "GET", headers, cache: "no-store", signal: ac.signal }
+      );
+      if (r.ok) return; // local won
+    } catch (_) {
+      // ignore — fall through to cloud
+    } finally {
+      clearTimeout(to);
+    }
+  }
+
+  // 2. Cloud fallback. Re-uses the standard timeout + retry behaviour
+  //    of callUrl because we're already off the happy path.
+  if (!target.cloudBase || !target.thing) return;
+  const headers = new Headers();
+  if (target.cloudToken) headers.set("Authorization", `Bearer ${target.cloudToken}`);
+  const cloudUrl = `${trimSlash(target.cloudBase)}/?thing=${encodeURIComponent(target.thing)}&mode=${mode}`;
+  await callUrl(cloudUrl, timeoutSec, { method: "POST", headers }).catch(() => {});
+}
+
 async function applySideEffects(next, cfg) {
   await setToolbarIcon(next.state, cfg);
 
@@ -378,6 +429,7 @@ async function applySideEffects(next, cfg) {
     if (t.type === "listener") jobs.push(runListenerTarget(t, vars, timeoutSec));
     else if (t.type === "simpleLed") jobs.push(runSimpleLedTarget(t, vars, timeoutSec));
     else if (t.type === "httpHook") jobs.push(runHttpHookTarget(t, vars, timeoutSec));
+    else if (t.type === "iotHybrid") jobs.push(runIotHybridTarget(t, vars, timeoutSec));
   }
   await Promise.allSettled(jobs);
 }
