@@ -48,3 +48,62 @@ jobs:
           files: dist.zip
           generate_release_notes: true
 
+      - name: Upload to Chrome Web Store (draft)
+        # Pushes the freshly-built dist.zip to the existing extension in
+        # the Chrome Web Store dev console as a draft version. It does
+        # NOT publish — the maintainer reviews the draft in the dev
+        # console and clicks "Submit for review" by hand. That keeps
+        # control over what reaches Google's review queue while still
+        # automating the upload itself.
+        #
+        # Required GitHub Secrets (Settings → Secrets and variables →
+        # Actions):
+        #   CWS_CLIENT_ID      — OAuth Desktop client ID
+        #   CWS_CLIENT_SECRET  — OAuth Desktop client secret
+        #   CWS_REFRESH_TOKEN  — long-lived refresh token captured once
+        #   CWS_EXTENSION_ID   — the 32-char id from the CWS URL
+        env:
+          CLIENT_ID:     ${{ secrets.CWS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          EXTENSION_ID:  ${{ secrets.CWS_EXTENSION_ID }}
+        run: |
+          set -euo pipefail
+
+          # 1) Exchange the refresh token for a short-lived access token.
+          #    jq is preinstalled on GitHub-hosted ubuntu runners.
+          ACCESS_TOKEN="$(curl -fsS https://oauth2.googleapis.com/token \
+            -d client_id="$CLIENT_ID" \
+            -d client_secret="$CLIENT_SECRET" \
+            -d refresh_token="$REFRESH_TOKEN" \
+            -d grant_type=refresh_token \
+            | jq -r '.access_token // empty')"
+
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "::error::Failed to obtain access token from Google OAuth"
+            echo "::error::Check CWS_CLIENT_ID / CWS_CLIENT_SECRET / CWS_REFRESH_TOKEN are set and current."
+            exit 1
+          fi
+
+          # 2) PUT the new ZIP against the existing extension. Replaces
+          #    any previous unsubmitted draft.
+          RESPONSE="$(curl -fsS -X PUT \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "x-goog-api-version: 2" \
+            -T dist.zip \
+            "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$EXTENSION_ID")"
+
+          echo "$RESPONSE"
+
+          STATUS="$(echo "$RESPONSE" | jq -r '.uploadState // empty')"
+          if [ "$STATUS" != "SUCCESS" ]; then
+            echo "::error::CWS upload reported uploadState=$STATUS"
+            echo "$RESPONSE" | jq -r '.itemError[]?.error_detail // .itemError[]?.error_code // empty'
+            exit 1
+          fi
+
+          echo ""
+          echo "✓ Uploaded ${GITHUB_REF_NAME} as a draft."
+          echo "  Review at https://chrome.google.com/webstore/devconsole"
+          echo "  and click 'Submit for review' when the listing diff looks right."
+
