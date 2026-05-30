@@ -171,14 +171,23 @@ const TEMPLATES = {
     // enabling both "On-Air API" and "OnAir Cloud Bridge" in
     // parallel, but with proper fall-through semantics so the device
     // receives exactly one command per event.
+    //
+    // The string fields here are intentionally empty: the inputs in
+    // renderTargets carry their own `placeholder="…"` hints in grey,
+    // so adding from this template gives the user empty fields plus
+    // example text, instead of pre-populated REPLACE_WITH_* literals
+    // that would otherwise leak straight into an Export Settings
+    // file if the user didn't actually overtype them. The mode and
+    // timeout defaults stay populated because those ARE the real
+    // defaults, not placeholders.
     label: "OnAir IoT — local first, AWS fallback",
     target: {
       type: "iotHybrid",
-      localBase: "http://REPLACE_WITH_DEVICE_IP",
-      localToken: "REPLACE_WITH_DEVICE_TOKEN",
-      cloudBase: "https://API_ID.execute-api.eu-west-1.amazonaws.com",
-      cloudToken: "REPLACE_WITH_BEARER_TOKEN",
-      thing: "YOUR_THING",
+      localBase: "",
+      localToken: "",
+      cloudBase: "",
+      cloudToken: "",
+      thing: "",
       modeOn: 1,
       modeOff: 0,
       localTimeoutMs: 1500
