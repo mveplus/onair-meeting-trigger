@@ -497,7 +497,7 @@ function renderTargets(cfg) {
               <input type="text" class="t_localBase" placeholder="http://10.37.22.98" value="${esc(t.localBase || "")}">
             </label>
             <label>Local API token (<code>X-API-Token</code>)
-              <input type="text" class="t_localToken" placeholder="device API token" value="${esc(t.localToken || "")}">
+              <input type="password" class="t_localToken" placeholder="device API token" value="${esc(t.localToken || "")}" autocomplete="off" spellcheck="false">
             </label>
           </div>
           <div>
@@ -505,7 +505,7 @@ function renderTargets(cfg) {
               <input type="text" class="t_cloudBase" placeholder="https://API_ID.execute-api.eu-west-1.amazonaws.com" value="${esc(t.cloudBase || "")}">
             </label>
             <label>Cloud bearer token (<code>Authorization</code>)
-              <input type="text" class="t_cloudToken" placeholder="bearer token" value="${esc(t.cloudToken || "")}">
+              <input type="password" class="t_cloudToken" placeholder="bearer token" value="${esc(t.cloudToken || "")}" autocomplete="off" spellcheck="false">
             </label>
           </div>
         </div>
