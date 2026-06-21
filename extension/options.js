@@ -19,7 +19,8 @@ import {
   exportFileName,
   formatBuildBadge,
   BLANK_CHOICES,
-  resolveAddChoice
+  resolveAddChoice,
+  settingsSignature
 } from "./shared.js";
 
 const DEFAULTS = {
@@ -402,6 +403,7 @@ function renderCustomServices(cfg) {
 
     wrap.appendChild(div);
   });
+  refreshDirty();
 }
 
 function readCustomServicesFromUI(cfg) {
@@ -440,13 +442,22 @@ function renderTargets(cfg) {
   const wrap = $("targets");
   wrap.innerHTML = "";
 
+  if (!(cfg.targets || []).length) {
+    const empty = document.createElement("div");
+    empty.className = "emptyTargets";
+    empty.textContent = "No targets yet — pick one from “Add a target…” above to drive your sign or service.";
+    wrap.appendChild(empty);
+    refreshDirty();
+    return;
+  }
+
   (cfg.targets || []).forEach((t, idx) => {
-    const typeLabel = t.type === "listener" ? "Listener"
-      : t.type === "simpleLed" ? "Simple LED"
+    const typeLabel = t.type === "listener" ? "Local listener"
+      : t.type === "simpleLed" ? "LED sign"
       // A cloud-only iotHybrid (no local URL) is just the AWS bridge; only
       // call it "local + cloud" once a LAN path is actually configured.
       : t.type === "iotHybrid" ? (t.localBase ? "IoT (local + cloud)" : "Cloud Bridge (AWS IoT Lambda)")
-      : "HTTP";
+      : "HTTP request";
 
     const div = document.createElement("div");
     div.className = "target";
@@ -605,6 +616,7 @@ function renderTargets(cfg) {
 
     wrap.appendChild(div);
   });
+  refreshDirty();
 }
 
 function wireValidation(node, t) {
@@ -777,8 +789,12 @@ async function load() {
   // Store current cfg on window for edits
   cfg.customServices = normalizeCustomServices(cfg.customServices, newId);
   window.__cfg = cfg;
+  // Baseline for "unsaved changes" detection — set before rendering so the
+  // initial render reads as clean.
+  savedSignature = settingsSignature(cfg);
   renderCustomServices(cfg);
   renderTargets(cfg);
+  refreshDirty();
 }
 
 function addCustomService() {
@@ -841,10 +857,11 @@ function addTarget(type, templateKey = "") {
   renderTargets(cfg);
 }
 
-async function save() {
-  let cfg = window.__cfg;
-
-  cfg = {
+// Build the full config object from the current UI state. Shared by
+// save() and the dirty-state check so they can't drift.
+function collectConfigFromUI() {
+  const prev = window.__cfg || DEFAULTS;
+  let cfg = {
     services: {
       meet: $("svc_meet").checked,
       teams: $("svc_teams").checked,
@@ -852,15 +869,51 @@ async function save() {
     },
     triggerMode: $("mode_select").value || "ANY_TAB",
     timeoutSec: clampTimeoutSec($("http_timeout").value, 3),
-    targets: cfg.targets || [],
-    customServices: cfg.customServices || [],
+    targets: prev.targets || [],
+    customServices: prev.customServices || [],
     theme: $("theme_switch").checked ? "dark" : "light",
     iconMode: $("icon_mode").value || DEFAULTS.iconMode,
     includeMeetingUrl: $("include_meeting_url").checked
   };
-
   cfg = readCustomServicesFromUI(cfg);
   cfg = readTargetsFromUI(cfg);
+  return cfg;
+}
+
+// "Unsaved changes" state. savedSignature is the signature of what's in
+// storage; whenever the UI signature differs, show the sticky save bar.
+// There is no separate Save button — the bar is the save affordance, and
+// it reappears automatically whenever the form drifts from saved.
+let savedSignature = "";
+let savedFlashTimer = null;
+let flashing = false;
+
+function refreshDirty() {
+  const bar = $("savebar");
+  if (!bar || savedSignature === "" || flashing) return;
+  const dirty = settingsSignature(collectConfigFromUI()) !== savedSignature;
+  bar.classList.toggle("show", dirty);
+}
+
+// Briefly turn the save bar into a green "Saved" confirmation in place,
+// then let refreshDirty hide it (since the form now matches storage).
+function flashSaved() {
+  const bar = $("savebar");
+  if (!bar) return;
+  flashing = true;
+  clearTimeout(savedFlashTimer);
+  bar.classList.add("show", "saved");
+  $("savebar_msg").textContent = "Saved";
+  savedFlashTimer = setTimeout(() => {
+    flashing = false;
+    bar.classList.remove("saved");
+    $("savebar_msg").textContent = "You have unsaved changes";
+    refreshDirty();
+  }, 1400);
+}
+
+async function save() {
+  const cfg = collectConfigFromUI();
 
   // Request permissions for all enabled target origins
   for (const url of getOriginsFromTargets(cfg)) {
@@ -877,7 +930,8 @@ async function save() {
     chrome.storage.local.set({ secrets })
   ]);
   window.__cfg = cfg;
-  showStatus("Saved");
+  savedSignature = settingsSignature(cfg);
+  flashSaved();
   chrome.runtime.sendMessage({ type: "CONFIG_UPDATED" });
 }
 
@@ -1074,38 +1128,6 @@ function btoaSafe(s) {
   try { return btoa(s); } catch { return ""; }
 }
 
-async function testAll(state) {
-  const { config } = await chrome.storage.sync.get({ config: DEFAULTS });
-  const cfg = migrateIfNeeded(config);
-
-  const vars = { state, service: "test", url: "", ts: Date.now() };
-  const timeoutMs = Math.max(1, Math.min(20, parseInt(cfg.timeoutSec ?? 3, 10))) * 1000;
-
-  const jobs = (cfg.targets || []).filter(t => t.enabled).map(async (t) => {
-    if (t.type === "listener") {
-      const url = buildListenerUrl(t.url, vars);
-      if (!url) return { ok:false, name:t.id };
-      return fetchWithTimeout(url, { method:"GET" }, timeoutMs).then(ok => ({ ok, name:t.id }));
-    }
-
-    if (t.type === "simpleLed") {
-      const base = trimSlash(t.baseUrl || "");
-      if (!base) return { ok:false, name:t.id };
-      const url = base + (state === "ON" ? "/led/on" : "/led/off");
-      return fetchWithTimeout(url, { method:"GET" }, timeoutMs).then(ok => ({ ok, name:t.id }));
-    }
-
-    // httpHook
-    const ok = await testHttpHookTarget(t, vars, timeoutMs, state);
-    return { ok, name: t.id };
-  });
-
-  const res = await Promise.allSettled(jobs);
-  const okCount = res.filter(r => r.status === "fulfilled" && r.value.ok).length;
-  const total = res.length;
-  showStatus(`Test ${state}: ${okCount}/${total} OK`, okCount === total);
-}
-
 async function fetchWithTimeout(url, opts, timeoutMs, checkStatus = true) {
   for (let attempt = 0; attempt <= RETRY_MAX; attempt++) {
     const ac = new AbortController();
@@ -1203,9 +1225,11 @@ async function fetchWithTimeoutResult(url, opts, timeoutMs) {
   return { ok: false, status: 0, text: "", error: true };
 }
 
-$("save").addEventListener("click", save);
-$("test_on").addEventListener("click", () => testAll("ON"));
-$("test_off").addEventListener("click", () => testAll("OFF"));
+$("savebar_save").addEventListener("click", save);
+
+// Any edit anywhere in the form re-checks the unsaved-changes state.
+document.addEventListener("input", refreshDirty);
+document.addEventListener("change", refreshDirty);
 
 $("add_custom_service").addEventListener("click", addCustomService);
 $("add_template").addEventListener("click", () => {
@@ -1302,6 +1326,7 @@ document.querySelectorAll(".timeout-pill").forEach(btn => {
   btn.addEventListener("click", () => {
     $("http_timeout").value = btn.dataset.val;
     updateTimeoutPills();
+    refreshDirty();
   });
 });
 

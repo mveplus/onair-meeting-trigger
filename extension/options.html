@@ -130,6 +130,10 @@
       box-shadow: var(--glow);
       outline: none;
     }
+    /* Native checkboxes (e.g. "Include secrets") should follow the theme
+       instead of rendering with the browser's default light chrome. */
+    input[type="checkbox"] { accent-color: var(--accent); }
+    body[data-theme="dark"] input[type="checkbox"] { color-scheme: dark; }
     textarea { min-height: 88px; font-family: "Courier New", Courier, monospace; }
     .row { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .muted { color: var(--muted); font-size: 13px; }
@@ -373,6 +377,46 @@
     }
     .badge.warn { border-color: #e7c9a4; color: #8a5a1f; background: #fff3e2; }
     body[data-theme="dark"] .badge.warn { color: #ffd6a6; background: #3a2c1b; border-color: #6a4a28; }
+    .prefRow {
+      display:flex;
+      gap: 16px;
+      align-items:center;
+      padding: 12px 0;
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .prefRow:first-of-type { border-top: none; padding-top: 4px; }
+    .prefLabel { display:flex; flex-direction:column; min-width: 150px; }
+    .prefLabel .muted { font-size: 12px; }
+    .savebar {
+      display:none;
+      position: sticky;
+      top: 12px;
+      z-index: 5;
+      align-items:center;
+      gap: 12px;
+      margin: 14px 0;
+      padding: 10px 14px;
+      border: 1px solid #e7c9a4;
+      background: #fff3e2;
+      color: #8a5a1f;
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+    }
+    body[data-theme="dark"] .savebar { border-color:#6a4a28; background:#3a2c1b; color:#ffd6a6; }
+    .savebar.show { display:flex; }
+    .savebar.saved { border-color:#9ccfa6; background:#e6f6ea; color:#1f6b35; }
+    body[data-theme="dark"] .savebar.saved { border-color:#2f6b3f; background:#1c3a28; color:#9fe0b5; }
+    .savebar.saved #savebar_save { display:none; }
+    .savebar .dot { width:8px; height:8px; border-radius:999px; background: currentColor; }
+    .savebar .spacer { flex: 1; }
+    .emptyTargets {
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      padding: 22px 14px;
+      text-align: center;
+      color: var(--muted);
+    }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     @media (max-width: 760px) {
@@ -405,7 +449,16 @@
             title="Unpacked dev build — git branch @ commit"></code>
     </div>
 
+    <div class="savebar" id="savebar">
+      <span class="dot"></span>
+      <span id="savebar_msg">You have unsaved changes</span>
+      <span class="spacer"></span>
+      <button class="primary" id="savebar_save">Save now</button>
+    </div>
+
     <div class="card">
+      <h2>Meeting detection</h2>
+      <p class="muted" style="margin:-4px 0 12px;">Turn the sign on when an open tab matches one of these services.</p>
       <div class="checkGrid">
         <label class="checkItem">
           <input type="checkbox" id="svc_meet">
@@ -423,6 +476,15 @@
           <span>Zoom <span class="muted">(zoom.us / app.zoom.us)</span></span>
         </label>
       </div>
+      <div class="triggerRow" style="margin-top:12px;">
+        <label style="margin:0; display:flex; align-items:center; gap:10px;">
+          <span>Trigger when</span>
+          <select id="mode_select" class="selectButton modeSelect">
+            <option value="ANY_TAB">Any matching tab is open</option>
+            <option value="ACTIVE_TAB">Only the active tab matches</option>
+          </select>
+        </label>
+      </div>
     </div>
 
     <div class="card">
@@ -438,23 +500,12 @@
       <div id="custom_services"></div>
     </div>
 
-    <div class="card">
-      <div class="triggerRow">
-        <h2>Trigger Mode</h2>
-        <select id="mode_select" class="selectButton modeSelect">
-          <option value="ANY_TAB">Any matching tab</option>
-          <option value="ACTIVE_TAB">Only when tab is active</option>
-        </select>
-        <div class="pillGroup">
-          <span class="muted">Timeout (all targets)</span>
-          <button class="pillButton timeout-pill" data-val="1">1s</button>
-          <button class="pillButton timeout-pill" data-val="3">3s</button>
-          <button class="pillButton timeout-pill" data-val="5">5s</button>
-          <button class="pillButton timeout-pill" data-val="10">10s</button>
-          <input type="hidden" id="http_timeout" value="3" />
-        </div>
+    <div class="card" id="prefs_card">
+      <h2>Preferences</h2>
+
+      <div class="prefRow">
+        <div class="prefLabel"><b>Appearance</b><span class="muted">Toolbar icon</span></div>
         <label style="margin:0;" class="iconPicker">
-          Toolbar Icon
           <img id="icon_preview" class="iconPreview" alt="Icon preview" src="icons/icon48.png" />
           <select id="icon_mode" class="selectButton">
             <option value="alwaysColor">Always color</option>
@@ -462,18 +513,34 @@
           </select>
         </label>
       </div>
-      <label class="checkItem" style="margin-top:12px; cursor:pointer;">
-        <input type="checkbox" id="include_meeting_url">
-        <span class="checkBox"></span>
-        <span>Include the full meeting URL (with meeting ID) in requests
-          <span class="muted">(off by default — when off, <code>{url}</code> is just the
-          site origin like <code>https://meet.google.com</code>, so the host is shared but
-          the meeting ID never leaves the browser; turn on to send the complete URL)</span></span>
-      </label>
+
+      <div class="prefRow">
+        <div class="prefLabel"><b>Privacy</b><span class="muted">Meeting URL</span></div>
+        <label class="checkItem" style="margin:0; cursor:pointer; border:none; padding:0; background:none;">
+          <input type="checkbox" id="include_meeting_url">
+          <span class="checkBox"></span>
+          <span>Include the full meeting URL (with meeting ID) in requests
+            <span class="muted">(off by default — when off, <code>{url}</code> is just the
+            site origin like <code>https://meet.google.com</code>, so the host is shared but
+            the meeting ID never leaves the browser)</span></span>
+        </label>
+      </div>
+
+      <div class="prefRow">
+        <div class="prefLabel"><b>Advanced</b><span class="muted">Request timeout</span></div>
+        <div class="pillGroup">
+          <button class="pillButton timeout-pill" data-val="1">1s</button>
+          <button class="pillButton timeout-pill" data-val="3">3s</button>
+          <button class="pillButton timeout-pill" data-val="5">5s</button>
+          <button class="pillButton timeout-pill" data-val="10">10s</button>
+          <input type="hidden" id="http_timeout" value="3" />
+        </div>
+      </div>
     </div>
 
     <div class="card">
-      <h2>Targets (LAN / local outputs)</h2>
+      <h2>Targets</h2>
+      <p class="muted" style="margin:-4px 0 12px;">What to drive when a meeting is detected — your ON-AIR sign, an LED, a webhook, or any HTTP endpoint on your LAN or in the cloud.</p>
       <div class="btns">
         <select id="target_template" class="selectButton compact">
           <option value="">Add a target…</option>
@@ -494,10 +561,7 @@
       <div id="targets"></div>
     </div>
 
-    <div class="btns">
-      <button class="primary" id="save">Save</button>
-      <button id="test_on">Test ALL ON</button>
-      <button id="test_off">Test ALL OFF</button>
+    <div class="btns" style="min-height:20px;">
       <span class="status" id="status"></span>
     </div>
 

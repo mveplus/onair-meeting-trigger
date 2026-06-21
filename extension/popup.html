@@ -9,39 +9,74 @@
       --muted: #586a72;
       --pill-bg: #f5f5f5;
       --pill-border: #c2d0d6;
-      --pill-on-bg: #e9ffff;
-      --pill-on-border: #0aa;
       --btn-bg: #fafafa;
       --btn-border: #c2d0d6;
       --surface: #ffffff;
+      --on-bg: #e8413a;
+      --on-ink: #ffffff;
+      --off-bg: #eef2f3;
+      --off-ink: #51646b;
+      --paused-bg: #f6e7c8;
+      --paused-ink: #6b5417;
+      --accent: #00b0b0;
     }
     body[data-theme="dark"] {
       --ink: #e7f3f5;
       --muted: #9fb5bb;
       --pill-bg: #1a2a31;
       --pill-border: #2a4954;
-      --pill-on-bg: #193a42;
-      --pill-on-border: #35d5d5;
       --btn-bg: #172a32;
       --btn-border: #2a4954;
       --surface: #0f1f25;
+      --on-bg: #c5362f;
+      --on-ink: #fff;
+      --off-bg: #16262d;
+      --off-ink: #9fb5bb;
+      --paused-bg: #3a2c1b;
+      --paused-ink: #ffd6a6;
+      --accent: #35d5d5;
     }
+    * { box-sizing: border-box; }
     body {
       font-family: system-ui, sans-serif;
-      margin: 12px;
-      min-width: 280px;
+      margin: 0;
+      width: 280px;
       color: var(--ink);
       background: var(--surface);
     }
-    .row { display:flex; justify-content:space-between; align-items:center; margin: 8px 0; }
-    .pill { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--pill-border); background: var(--pill-bg); }
-    .on { background: var(--pill-on-bg); border-color: var(--pill-on-border); }
-    .off { background: var(--pill-bg); }
-    .muted { color: var(--muted); font-size: 12px; margin-top: 8px; }
-    button { padding: 6px 10px; border-radius: 10px; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--ink); cursor: pointer; }
+    .wrap { padding: 14px; }
+    .statusCard {
+      border-radius: 14px;
+      padding: 18px 14px;
+      text-align: center;
+      background: var(--off-bg);
+      color: var(--off-ink);
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+    .statusCard.on { background: var(--on-bg); color: var(--on-ink); }
+    .statusCard.paused { background: var(--paused-bg); color: var(--paused-ink); }
+    .statusBig { font-size: 20px; font-weight: 800; letter-spacing: 0.4px; }
+    .statusSub { font-size: 13px; margin-top: 4px; opacity: 0.92; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .targetsLine { margin: 10px 2px 0; }
+    .targetsLine a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+    .pauseRow { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; margin-top: 12px; }
+    .pauseRow .lbl { font-size: 12px; color: var(--muted); margin-right: 2px; }
+    button {
+      padding: 7px 11px;
+      border-radius: 10px;
+      border: 1px solid var(--btn-border);
+      background: var(--btn-bg);
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { width: 100%; margin-top: 12px; font-weight: 600; }
+    button.small { padding: 5px 9px; font-size: 12px; }
     .buildBadge {
       display: none;
-      margin-top: 10px;
+      margin-top: 12px;
       padding: 4px 8px;
       border-radius: 8px;
       border: 1px dashed var(--btn-border);
@@ -54,20 +89,21 @@
   </style>
 </head>
 <body>
-  <div class="row">
-    <div><b>ON-AIR</b></div>
-    <div id="state" class="pill off">OFF</div>
+  <div class="wrap">
+    <div class="statusCard off" id="status_card">
+      <div class="statusBig" id="status_big">Off air</div>
+      <div class="statusSub" id="status_sub">No meeting detected</div>
+    </div>
+
+    <div class="targetsLine muted" id="targets_line"></div>
+
+    <div class="pauseRow" id="pause_row"></div>
+
+    <button id="openOptions" class="primary">⚙ Settings</button>
+
+    <div class="muted" id="icon_hint" style="display:none; margin-top:10px;">Grayscale icon = OFF. Color icon = ON.</div>
+    <div class="buildBadge" id="build_badge" title="Unpacked dev build — git branch @ commit"></div>
   </div>
-  <div class="row">
-    <div>Service</div>
-    <div id="service" class="muted">—</div>
-  </div>
-  <div class="row">
-    <button id="openOptions">Settings</button>
-    <button id="refresh">Refresh</button>
-  </div>
-  <div class="muted" id="icon_hint" style="display:none;">Grayscale icon = OFF. Color icon = ON.</div>
-  <div class="buildBadge" id="build_badge" title="Unpacked dev build — git branch @ commit"></div>
   <script type="module" src="popup.js"></script>
 </body>
 </html>

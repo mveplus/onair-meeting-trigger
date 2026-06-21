@@ -18,7 +18,8 @@ import {
   meetingUrlForVars,
   httpHookSuccess,
   applySecrets,
-  extractSecrets
+  extractSecrets,
+  isPaused
 } from "./shared.js";
 
 const LEGACY_DEFAULTS = {
@@ -222,6 +223,19 @@ function sameState(a, b) {
   return a.state === b.state && a.service === b.service;
 }
 
+async function getPause() {
+  const { pause } = await chrome.storage.local.get({ pause: { until: 0 } });
+  return pause || { until: 0 };
+}
+
+// Tell any open popup the state/pause changed. Rejects (no receiver)
+// when no popup is open — that's expected, so swallow it.
+function broadcastState(pause) {
+  chrome.runtime
+    .sendMessage({ type: "STATE_CHANGED", state: current.state, service: current.service, pause })
+    .catch(() => {});
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -402,7 +416,9 @@ async function applySideEffects(next, cfg) {
 async function tick(reason = "") {
   debugLog("tick:start", reason);
   const cfg = await getConfig();
-  const next = await computeState(cfg);
+  const pause = await getPause();
+  // While paused, force OFF regardless of meeting tabs.
+  const next = isPaused(pause) ? { state: "OFF", service: null, url: null } : await computeState(cfg);
 
   if (sameState(next, current)) {
     // Ensure icon is correct after SW wake
@@ -416,10 +432,12 @@ async function tick(reason = "") {
   debugLog("tick:debounce", next.state, next.service);
   debounceTimer = setTimeout(async () => {
     const cfg2 = await getConfig();
-    const next2 = await computeState(cfg2);
+    const pause2 = await getPause();
+    const next2 = isPaused(pause2) ? { state: "OFF", service: null, url: null } : await computeState(cfg2);
     current = { ...next2, ts: Date.now() };
     debugLog("tick:apply", current.state, current.service);
     await applySideEffects(current, cfg2);
+    broadcastState(pause2);
   }, DEBOUNCE_MS);
 }
 
@@ -460,12 +478,29 @@ ensureReconcileAlarm();
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     if (msg?.type === "GET_STATE") {
-      sendResponse({ state: current.state, service: current.service });
+      const pause = await getPause();
+      sendResponse({ state: current.state, service: current.service, pause });
       return;
     }
     if (msg?.type === "CONFIG_UPDATED") {
       await tick("config");
       sendResponse({ ok: true });
+      return;
+    }
+    if (msg?.type === "SET_PAUSE") {
+      // until: PAUSE_INDEFINITE (-1) for "until I resume", or an epoch-ms.
+      const until = Number(msg.until) || 0;
+      await chrome.storage.local.set({ pause: { until } });
+      await tick("pause");
+      broadcastState({ until });
+      sendResponse({ ok: true, pause: { until } });
+      return;
+    }
+    if (msg?.type === "RESUME") {
+      await chrome.storage.local.set({ pause: { until: 0 } });
+      await tick("resume");
+      broadcastState({ until: 0 });
+      sendResponse({ ok: true, pause: { until: 0 } });
       return;
     }
     sendResponse({ ok: false });

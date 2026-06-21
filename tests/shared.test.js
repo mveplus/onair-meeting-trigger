@@ -28,7 +28,14 @@ import {
   exportFileName,
   formatBuildBadge,
   BLANK_CHOICES,
-  resolveAddChoice
+  resolveAddChoice,
+  PAUSE_INDEFINITE,
+  isPaused,
+  pauseRemainingMs,
+  describePause,
+  countEnabledTargets,
+  describeMeetingState,
+  settingsSignature
 } from "../extension/shared.js";
 
 // ---------------------------------------------------------------------------
@@ -416,5 +423,73 @@ describe('"Add target" dropdown: resolveAddChoice', () => {
 
   test("BLANK_CHOICES covers the two former add buttons", () => {
     assert.deepEqual(Object.values(BLANK_CHOICES).map(c => c.type).sort(), ["httpHook", "listener"]);
+  });
+});
+
+describe("UI: pause state", () => {
+  const now = 1_000_000;
+
+  test("isPaused handles none / indefinite / timed / expired", () => {
+    assert.equal(isPaused(undefined, now), false);
+    assert.equal(isPaused({ until: 0 }, now), false);
+    assert.equal(isPaused({ until: PAUSE_INDEFINITE }, now), true);
+    assert.equal(isPaused({ until: now + 1000 }, now), true);
+    assert.equal(isPaused({ until: now - 1000 }, now), false); // expired
+  });
+
+  test("pauseRemainingMs returns Infinity for indefinite, ms for timed", () => {
+    assert.equal(pauseRemainingMs({ until: PAUSE_INDEFINITE }, now), Infinity);
+    assert.equal(pauseRemainingMs({ until: now + 5000 }, now), 5000);
+    assert.equal(pauseRemainingMs({ until: 0 }, now), 0);
+  });
+
+  test("describePause is human-readable or null", () => {
+    assert.equal(describePause(null, now), null);
+    assert.equal(describePause({ until: PAUSE_INDEFINITE }, now), "Paused");
+    assert.equal(describePause({ until: now + 25 * 60000 }, now), "Paused · 25m left");
+    assert.equal(describePause({ until: now + 90 * 60000 }, now), "Paused · 1h 30m left");
+    assert.equal(describePause({ until: now + 60 * 60000 }, now), "Paused · 1h left");
+  });
+});
+
+describe("UI: popup summary helpers", () => {
+  test("countEnabledTargets counts only enabled", () => {
+    assert.equal(countEnabledTargets({ targets: [{ enabled: true }, { enabled: false }, { enabled: true }] }), 2);
+    assert.equal(countEnabledTargets({ targets: [] }), 0);
+    assert.equal(countEnabledTargets({}), 0);
+  });
+
+  test("describeMeetingState is plain language", () => {
+    assert.equal(describeMeetingState("OFF", null), "No meeting detected");
+    assert.equal(describeMeetingState("ON", "meet"), "In Google Meet");
+    assert.equal(describeMeetingState("ON", "zoom"), "In Zoom");
+    assert.equal(describeMeetingState("ON", "Webex"), "In Webex"); // custom service name passthrough
+  });
+});
+
+describe("UI: settingsSignature (dirty detection)", () => {
+  const cfg = () => ({
+    services: { meet: true, teams: false, zoom: true },
+    triggerMode: "ANY_TAB", timeoutSec: 3, iconMode: "alwaysColor",
+    includeMeetingUrl: false, theme: "light", customServices: [],
+    targets: [{ id: "a1", type: "httpHook", enabled: true, onUrl: "https://h/on", offUrl: "https://h/off" }]
+  });
+
+  test("identical configs (and id-only differences) produce the same signature", () => {
+    const a = cfg();
+    const b = cfg();
+    b.targets[0].id = "different-id"; // id must not affect the signature
+    assert.equal(settingsSignature(a), settingsSignature(b));
+  });
+
+  test("a meaningful change flips the signature", () => {
+    const a = cfg();
+    const b = cfg();
+    b.targets[0].onUrl = "https://h/on2";
+    assert.notEqual(settingsSignature(a), settingsSignature(b));
+
+    const c = cfg();
+    c.services.teams = true;
+    assert.notEqual(settingsSignature(a), settingsSignature(c));
   });
 });

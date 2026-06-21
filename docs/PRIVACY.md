@@ -1,6 +1,6 @@
 # Privacy Policy — ON-AIR Meeting Trigger
 
-**Last updated:** 2026-01-04
+**Last updated:** 2026-06-21
 
 ## Overview
 ON-AIR Meeting Trigger is a privacy-first browser extension designed to detect when the user is in an online meeting and signal that state to user-configured endpoints. The extension operates entirely on the user’s device.
@@ -37,17 +37,21 @@ To perform its single purpose, the extension checks whether browser tabs matchin
 - Data is not stored beyond runtime state
 
 ## Optional data in requests
-If configured by the user, the extension may include:
+The extension may include in the requests it sends to user-configured endpoints:
 - Meeting state (`ON` / `OFF`)
-- Meeting service identifier
-- Meeting tab URL (optional)
+- Meeting service identifier (e.g. `meet`, `teams`, `zoom`)
+- Meeting URL — by default only the **site origin** (e.g. `https://meet.google.com`),
+  which carries no meeting ID. The full URL (including the meeting ID) is sent
+  **only** if the user explicitly enables "Include the full meeting URL" in Settings.
 
 This data is sent **only** to endpoints configured by the user and is not retained or transmitted elsewhere.
 
 ## Authentication
-If an endpoint requires authentication (for example, Home Assistant REST API), credentials or tokens are provided directly by the user and are stored locally in the browser’s extension storage.
+If an endpoint requires authentication (for example, the Home Assistant REST API or an AWS IoT cloud bridge), credentials or tokens are provided directly by the user.
 
-The extension does not intercept, transmit, or reuse authentication data for any other purpose.
+- Credentials are stored in the browser's **local** extension storage (`chrome.storage.local`) and are **not** synced to the user's browser/Google account.
+- Credentials are **excluded from exported settings files** by default; the user must explicitly opt in to include them.
+- The extension does not intercept, transmit, or reuse authentication data for any purpose other than calling the endpoints the user configured.
 
 ## Third-party access
 The developer does not have access to any data generated or transmitted by the extension.

@@ -26,6 +26,20 @@ State is either:
 
 ---
 
+## Toolbar popup
+
+Click the toolbar icon for an at-a-glance status:
+
+- A big, color-coded card — **🔴 ON AIR**, **Off air**, or **⏸ Paused** — with a
+  plain-language line ("In Google Meet" / "No meeting detected"). It updates live.
+- How many outputs are wired up ("3 targets active"), or a shortcut to Settings
+  when none are configured.
+- **Pause** — silence the sign without opening Settings: **1 hour** or **Until I
+  resume**. While paused the sign is forced OFF and meeting detection is
+  suppressed; **Resume** (or **+1h**) any time.
+
+---
+
 ## Targets (outputs)
 
 You can add **multiple targets** and enable/disable them independently:
@@ -112,9 +126,10 @@ Method:
 
 No headers/body needed for typical Tasmota setups.
 
-#### Push notifications 
+#### Push notifications
 
-![Push guide](https://raw.githubusercontent.com/mveplus/onair-meeting-trigger/refs/heads/docs/docs/ON-AIR-Push-Notifications.md)
+Drive phone push notifications (ntfy and others) with no smart-home hardware —
+see the [Push Notifications guide](../docs/ON-AIR-Push-Notifications.md).
 
 #### Import/export settings
 On the Settings page you can **export** all settings (targets, custom services,
@@ -123,7 +138,7 @@ move them between machines.
 
 Imported targets and custom services are appended to your existing list.
 Trigger settings are applied immediately in the UI.
-After importing, click **Save** to persist changes and permissions.
+After importing (or any edit), an **unsaved-changes** bar appears at the top — click **Save now** to persist changes and permissions.
 
 ---
 
@@ -211,14 +226,10 @@ You’ll be prompted to allow these when you save settings.
 
 ## Testing
 
-End-to-end against real targets, from the **Settings** page:
-
-- **Test ALL ON** / **Test ALL OFF**
-- Per-target **Test ON / Test OFF** buttons
-
-The Test buttons evaluate success with the exact same rule the live background
-dispatch uses (status codes + optional body match), so a hook that tests OK
-behaves identically in production.
+Each target row has its own **Test ON / Test OFF** buttons on the Settings page,
+so you can fire one output at a time and see exactly what it does. They evaluate
+success with the same rule the live background dispatch uses (status codes +
+optional body match), so a hook that tests OK behaves identically in production.
 
 Unit tests for the shared logic run with Node's built-in runner (no deps):
 
@@ -236,21 +247,10 @@ npm test
 
 ---
 
-## Changelog (local)
+## Changelog
 
-### AWS IoT Cloud Bridge + `iotHybrid` target (v0.3.0)
-- New target type **IoT (local + cloud)** with local-first + AWS IoT MQTT fallback semantics
-- Three new templates: **OnAir Cloud Bridge (AWS IoT Lambda)** (solid), the breathing sibling, and **OnAir IoT — local first, AWS fallback** (the hybrid)
-- Template dropdown now generated from the `TEMPLATES` object at runtime
-- iotHybrid round-trips cleanly through Export / Import Settings
-- Token fields in the iotHybrid row are masked in the UI
-- Host permission requested for iotHybrid local/cloud URLs both on **Save** and on per-row **Test ON/OFF** click (eliminates the misleading "CORS policy" error on first fetch after a fresh import)
-- Heads-up about `*.local` mDNS not resolving from MV3 service workers on Linux — recommend an IP + DHCP reservation for the local hook, or use the cloud-bridge templates that sidestep name resolution entirely
-
-### Universal Targets update
-- Added multi-target outputs (Listener / Simple LED / HTTP Hook)
-- Kept backward compatibility with previous `listenerUrl` and `direct` settings
-- Added token-based templating for easy integration with IoT endpoints
+Per-version history lives in the
+[GitHub Releases](https://github.com/mveplus/onair-meeting-trigger/releases).
 
 ---
 
@@ -323,8 +323,8 @@ or a WiZ Lights, example:
 {"entity_id":["light.wiz_1","light.wiz_2"]}'
 ```
 
-Save and approve the permission prompt.  
-Use **Test ALL ON / OFF** to verify.
+Save and approve the permission prompt.
+Use the target's **Test ON / Test OFF** buttons to verify.
 
 ---
 
@@ -363,6 +363,9 @@ Works with [Chrome Web Store](https://chromewebstore.google.com/detail/dhcgpjlbn
 - Avoids sandbox path invalidation
 - Recommended for Home Assistant + LAN IoT usage
 
-## ![Privacy poclicy](https://raw.githubusercontent.com/mveplus/onair-meeting-trigger/refs/heads/docs/docs/PRIVACY.md)
+## More
 
-## ![MIT License](https://raw.githubusercontent.com/mveplus/onair-meeting-trigger/refs/heads/docs/LICENSE)
+- [Privacy Policy](../docs/PRIVACY.md)
+- [Terms of Service](../docs/TERMS_OF_SERVICE.md)
+- [Templates guide](../docs/TEMPLATES.md)
+- [MIT License](../LICENSE)

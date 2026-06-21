@@ -369,3 +369,98 @@ export function formatBuildBadge(info, version) {
   const v = version ? `v${version}-dev` : "dev";
   return `${v} · ${branch} @ ${commit}${info.dirty ? "*" : ""}`;
 }
+
+// ---- pause state -------------------------------------------------------
+
+// pause = { until: number }:
+//   absent / 0            → not paused
+//   PAUSE_INDEFINITE (-1) → paused until manually resumed
+//   epoch-ms > now        → paused until that time
+export const PAUSE_INDEFINITE = -1;
+
+export function isPaused(pause, now = Date.now()) {
+  const until = pause?.until;
+  if (!until) return false;
+  if (until === PAUSE_INDEFINITE) return true;
+  return until > now;
+}
+
+export function pauseRemainingMs(pause, now = Date.now()) {
+  if (!isPaused(pause, now)) return 0;
+  if (pause.until === PAUSE_INDEFINITE) return Infinity;
+  return pause.until - now;
+}
+
+// Human-readable pause status for the popup, or null when not paused.
+export function describePause(pause, now = Date.now()) {
+  if (!isPaused(pause, now)) return null;
+  const rem = pauseRemainingMs(pause, now);
+  if (rem === Infinity) return "Paused";
+  const mins = Math.ceil(rem / 60000);
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `Paused · ${h}h${m ? ` ${m}m` : ""} left`;
+  }
+  return `Paused · ${mins}m left`;
+}
+
+// ---- popup summary helpers --------------------------------------------
+
+export function countEnabledTargets(cfg) {
+  return (cfg?.targets || []).filter(t => t && t.enabled).length;
+}
+
+// One-line, plain-language description of the meeting state for the popup.
+export function describeMeetingState(state, service) {
+  if (state !== "ON") return "No meeting detected";
+  const names = { meet: "Google Meet", teams: "Microsoft Teams", zoom: "Zoom" };
+  const label = service ? (names[service] || service) : "a meeting";
+  return `In ${label}`;
+}
+
+// ---- settings dirty detection -----------------------------------------
+
+function canonTarget(t) {
+  const base = { type: t.type, enabled: t.enabled !== false };
+  if (t.type === "listener") return { ...base, url: t.url || "" };
+  if (t.type === "simpleLed") return { ...base, baseUrl: t.baseUrl || "", verifyStatus: !!t.verifyStatus };
+  if (t.type === "iotHybrid") {
+    return {
+      ...base,
+      localBase: t.localBase || "", localToken: t.localToken || "",
+      cloudBase: t.cloudBase || "", cloudToken: t.cloudToken || "",
+      thing: t.thing || "", modeOn: clampMode(t.modeOn, 1), modeOff: clampMode(t.modeOff, 0),
+      localTimeoutMs: clampLocalTimeoutMs(t.localTimeoutMs, 1500)
+    };
+  }
+  return {
+    ...base,
+    onUrl: t.onUrl || "", offUrl: t.offUrl || "", method: (t.method || "GET").toUpperCase(),
+    headers: normalizeHeaders(t.headers), body: t.body || "",
+    basicAuth: t.basicAuth ? { user: t.basicAuth.user || "", pass: t.basicAuth.pass || "" } : null,
+    checkStatus: t.checkStatus !== false, statusCodes: normalizeStatusCodes(t.statusCodes),
+    matchOn: t.matchOn || "", matchOff: t.matchOff || ""
+  };
+}
+
+// Stable signature of the user-meaningful settings (ignores target ids
+// and field ordering noise) so the options page can tell whether the
+// form differs from what was last saved — and clear the "unsaved" state
+// if an edit is reverted.
+export function settingsSignature(cfg) {
+  const c = cfg || {};
+  const canon = {
+    services: { meet: !!c.services?.meet, teams: !!c.services?.teams, zoom: !!c.services?.zoom },
+    triggerMode: c.triggerMode === "ACTIVE_TAB" ? "ACTIVE_TAB" : "ANY_TAB",
+    timeoutSec: clampTimeoutSec(c.timeoutSec, 3),
+    iconMode: c.iconMode || "alwaysColor",
+    includeMeetingUrl: !!c.includeMeetingUrl,
+    theme: c.theme === "dark" ? "dark" : "light",
+    customServices: (c.customServices || []).map(s => ({
+      name: String(s.name || ""), enabled: s.enabled !== false, prefixes: [...(s.prefixes || [])]
+    })),
+    targets: (c.targets || []).map(canonTarget)
+  };
+  return JSON.stringify(canon);
+}

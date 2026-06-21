@@ -45,6 +45,16 @@ docs/, resources/  Documentation and store assets
 - **MV3 reliability:** a 1-minute `chrome.alarms` reconcile heartbeat
   (`alarms` permission) re-derives state so a suspended worker can't leave the
   sign stale; the 400 ms `setTimeout` debounce is kept for sub-second coalescing.
+- **Popup is status-first:** the worker broadcasts `STATE_CHANGED` and answers
+  `GET_STATE` with `{ state, service, pause }`; the popup renders a big
+  color-coded status card and a quick **Pause** control. Pause lives in
+  `chrome.storage.local` as `{ until }` (`PAUSE_INDEFINITE` or epoch-ms); while
+  paused, `tick()` forces OFF. Pure helpers: `isPaused`, `describePause`,
+  `describeMeetingState`, `countEnabledTargets`.
+- **Settings unsaved-changes bar:** `collectConfigFromUI()` builds the config
+  the same way `save()` does; `settingsSignature()` (pure, tested) compares it to
+  the saved baseline to drive a sticky save bar. Settings are grouped into
+  "Meeting detection" and a "Preferences" card (Appearance / Privacy / Advanced).
 - **Dev build badge:** `scripts/gen-build-info.sh` writes the gitignored
   `extension/build-info.json` (commit/branch/dirty); `build-zip.sh` runs it
   before zipping. The popup and options page fetch it and render
