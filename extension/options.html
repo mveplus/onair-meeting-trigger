@@ -387,11 +387,11 @@
     .savebar {
       display:none;
       position: sticky;
-      top: 0;
+      top: 12px;
       z-index: 5;
       align-items:center;
       gap: 12px;
-      margin: 0 0 12px;
+      margin: 14px 0;
       padding: 10px 14px;
       border: 1px solid #e7c9a4;
       background: #fff3e2;
@@ -401,6 +401,9 @@
     }
     body[data-theme="dark"] .savebar { border-color:#6a4a28; background:#3a2c1b; color:#ffd6a6; }
     .savebar.show { display:flex; }
+    .savebar.saved { border-color:#9ccfa6; background:#e6f6ea; color:#1f6b35; }
+    body[data-theme="dark"] .savebar.saved { border-color:#2f6b3f; background:#1c3a28; color:#9fe0b5; }
+    .savebar.saved #savebar_save { display:none; }
     .savebar .dot { width:8px; height:8px; border-radius:999px; background: currentColor; }
     .savebar .spacer { flex: 1; }
     .emptyTargets {
@@ -444,7 +447,7 @@
 
     <div class="savebar" id="savebar">
       <span class="dot"></span>
-      <span>You have unsaved changes</span>
+      <span id="savebar_msg">You have unsaved changes</span>
       <span class="spacer"></span>
       <button class="primary" id="savebar_save">Save now</button>
     </div>
@@ -554,8 +557,7 @@
       <div id="targets"></div>
     </div>
 
-    <div class="btns">
-      <button class="primary" id="save">Save</button>
+    <div class="btns" style="min-height:20px;">
       <span class="status" id="status"></span>
     </div>
 

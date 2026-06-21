@@ -123,7 +123,7 @@ move them between machines.
 
 Imported targets and custom services are appended to your existing list.
 Trigger settings are applied immediately in the UI.
-After importing, click **Save** to persist changes and permissions.
+After importing (or any edit), an **unsaved-changes** bar appears at the top — click **Save now** to persist changes and permissions.
 
 ---
 

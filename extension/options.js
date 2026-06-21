@@ -882,12 +882,34 @@ function collectConfigFromUI() {
 
 // "Unsaved changes" state. savedSignature is the signature of what's in
 // storage; whenever the UI signature differs, show the sticky save bar.
+// There is no separate Save button — the bar is the save affordance, and
+// it reappears automatically whenever the form drifts from saved.
 let savedSignature = "";
+let savedFlashTimer = null;
+let flashing = false;
+
 function refreshDirty() {
   const bar = $("savebar");
-  if (!bar || savedSignature === "") return;
+  if (!bar || savedSignature === "" || flashing) return;
   const dirty = settingsSignature(collectConfigFromUI()) !== savedSignature;
   bar.classList.toggle("show", dirty);
+}
+
+// Briefly turn the save bar into a green "Saved" confirmation in place,
+// then let refreshDirty hide it (since the form now matches storage).
+function flashSaved() {
+  const bar = $("savebar");
+  if (!bar) return;
+  flashing = true;
+  clearTimeout(savedFlashTimer);
+  bar.classList.add("show", "saved");
+  $("savebar_msg").textContent = "Saved";
+  savedFlashTimer = setTimeout(() => {
+    flashing = false;
+    bar.classList.remove("saved");
+    $("savebar_msg").textContent = "You have unsaved changes";
+    refreshDirty();
+  }, 1400);
 }
 
 async function save() {
@@ -909,8 +931,7 @@ async function save() {
   ]);
   window.__cfg = cfg;
   savedSignature = settingsSignature(cfg);
-  refreshDirty();
-  showStatus("Saved");
+  flashSaved();
   chrome.runtime.sendMessage({ type: "CONFIG_UPDATED" });
 }
 
@@ -1204,7 +1225,6 @@ async function fetchWithTimeoutResult(url, opts, timeoutMs) {
   return { ok: false, status: 0, text: "", error: true };
 }
 
-$("save").addEventListener("click", save);
 $("savebar_save").addEventListener("click", save);
 
 // Any edit anywhere in the form re-checks the unsaved-changes state.
