@@ -483,6 +483,10 @@
         </select>
         <button id="add_template">Add from Template</button>
         <button id="export_hooks">Export Settings</button>
+        <label class="muted" style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;"
+               title="Off (default): tokens/passwords are stripped from the exported file. On: they are written in plaintext — keep the file private.">
+          <input type="checkbox" id="export_secrets"> Include secrets
+        </label>
         <button id="import_hooks">Import Settings</button>
         <input type="file" id="import_hooks_file" accept="application/json" style="display:none" />
       </div>

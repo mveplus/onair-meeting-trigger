@@ -197,7 +197,12 @@ You’ll be prompted to allow these when you save settings.
   `chrome.storage.local` and are **never** written to `chrome.storage.sync`, so
   they aren't mirrored to your Google account. Everything else (URLs, modes,
   service toggles) syncs normally.
-- **Export Settings** omits credentials — you re-enter them after importing.
+- **Export Settings** omits credentials by default (you re-enter them after
+  importing), and confirms this before downloading so it's never silent. Tick
+  **Include secrets** next to the Export button to bundle tokens/passwords in
+  plaintext instead — that path requires a separate confirmation and names the
+  file `onair-settings-with-secrets.json` so a credential-bearing export is
+  obvious on disk.
 - A non-LAN endpoint carrying a token over plain `http://` shows a warning badge;
   use `https://` for anything off the local network.
 

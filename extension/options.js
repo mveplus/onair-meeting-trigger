@@ -890,9 +890,33 @@ function exportHooks() {
   const timeoutSec = clampTimeoutSec($("http_timeout").value, 3);
   const iconMode = $("icon_mode").value || DEFAULTS.iconMode;
 
-  // Fix 1: never write credentials into an exported file.
-  const safeTargets = redactSecrets({ targets: cfg.targets || [] }).targets || [];
-  const targets = safeTargets.map(t => {
+  // Fix 1 + user choice: credentials are excluded by default. The user
+  // can opt in via the "Include secrets" checkbox, and either way we pop
+  // a confirm so the consequence is never silent.
+  const allTargets = cfg.targets || [];
+  const hasSecrets = Object.keys(extractSecrets({ targets: allTargets }).secrets).length > 0;
+  const wantSecrets = $("export_secrets")?.checked === true;
+  const includeSecrets = hasSecrets && wantSecrets;
+
+  if (hasSecrets) {
+    const ok = includeSecrets
+      ? confirm(
+          "⚠️ Include secrets is ON.\n\n" +
+          "The exported file will contain your tokens / passwords in PLAINTEXT. " +
+          "Anyone who gets the file can read them — keep it private (don't email it, " +
+          "commit it, or sync it to a shared drive).\n\nExport WITH secrets?"
+        )
+      : confirm(
+          "Your saved tokens / passwords will NOT be included in this file " +
+          "(this is the safe default). You'll re-enter them after importing.\n\n" +
+          "Tip: tick \"Include secrets\" next to Export to bundle them instead.\n\n" +
+          "Export without secrets?"
+        );
+    if (!ok) return showStatus("Export cancelled", false);
+  }
+
+  const sourceTargets = includeSecrets ? allTargets : (redactSecrets({ targets: allTargets }).targets || []);
+  const targets = sourceTargets.map(t => {
     if (t.type === "listener") {
       return { type: "listener", url: t.url || "", enabled: t.enabled !== false };
     }
@@ -947,16 +971,22 @@ function exportHooks() {
     includeMeetingUrl: $("include_meeting_url").checked
   };
 
+  if (includeSecrets) payload.containsSecrets = true;
+
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "onair-settings.json";
+  // Name the file so a secret-bearing export is obvious on disk.
+  a.download = includeSecrets ? "onair-settings-with-secrets.json" : "onair-settings.json";
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  showStatus(`Exported ${targets.length} target(s) — credentials excluded`);
+  const note = includeSecrets ? " — ⚠️ includes secrets (keep private)"
+    : hasSecrets ? " — credentials excluded (re-enter after import)"
+    : "";
+  showStatus(`Exported ${targets.length} target(s)${note}`);
 }
 
 async function importHooksFromFile(file) {
