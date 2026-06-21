@@ -39,8 +39,9 @@ docs/, resources/  Documentation and store assets
   `basicAuth.pass`, `Authorization`/`X-API-Token` headers) live in
   `chrome.storage.local` via `extractSecrets`/`applySecrets`; only the sanitized
   config goes to `chrome.storage.sync`. Exports run through `redactSecrets`.
-- **Privacy:** the meeting tab URL is gated behind the `includeMeetingUrl`
-  setting (default off) — see `meetingUrlForVars`.
+- **Privacy:** the meeting URL is gated by `includeMeetingUrl` (default off) via
+  `meetingUrlForVars` — off sends the **origin only** (no meeting ID), on sends
+  the full URL.
 - **MV3 reliability:** a 1-minute `chrome.alarms` reconcile heartbeat
   (`alarms` permission) re-derives state so a suspended worker can't leave the
   sign stale; the 400 ms `setTimeout` debounce is kept for sub-second coalescing.

@@ -34,8 +34,9 @@ const DEFAULTS = {
   triggerMode: "ANY_TAB",
   timeoutSec: 3,
   iconMode: "alwaysColor",
-  // Privacy opt-in (Fix 3): when false, the meeting tab URL is never
-  // sent to targets ({url} resolves to "" and is not auto-appended).
+  // Privacy opt-in (Fix 3): when false, {url} is the site origin only
+  // (no meeting ID); when true, it's the full meeting URL. See
+  // meetingUrlForVars.
   includeMeetingUrl: false,
   targets: [
     // Examples:

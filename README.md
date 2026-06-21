@@ -25,7 +25,7 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 - Built-in templates for common targets, including OnAir Cloud Bridge (AWS IoT Lambda) — pick solid or breathing from the ON-mode dropdown — plus a local-first-hybrid variant
 - Import/export settings (includes trigger mode, timeout, toolbar icon mode) — credentials are excluded from exports
 - Flatpak / Snap compatible
-- Privacy-first (no telemetry; tokens are stored in `chrome.storage.local` and never synced to your Google account; the meeting tab URL is only sent to targets when you opt in)
+- Privacy-first (no telemetry; tokens are stored in `chrome.storage.local` and never synced to your Google account; only the meeting site origin is shared by default — the full meeting URL/ID is sent only when you opt in)
 
 ![ON-AIR Meeting Trigger Settings](resources/Screenshot_OnAir_dark_theme.png)
 

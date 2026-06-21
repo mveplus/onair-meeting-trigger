@@ -30,8 +30,8 @@ const DEFAULTS = {
   customServices: [],
   theme: "light",
   iconMode: "alwaysColor",
-  // Privacy opt-in (Fix 3): off by default so the meeting tab URL is
-  // never sent to targets unless the user explicitly turns it on.
+  // Privacy opt-in (Fix 3): off → {url} is the site origin only (no
+  // meeting ID); on → the full meeting URL.
   includeMeetingUrl: false
 };
 

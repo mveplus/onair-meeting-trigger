@@ -16,6 +16,7 @@ import {
   normalizeStatusCodes,
   buildListenerUrl,
   meetingUrlForVars,
+  originOf,
   httpHookSuccess,
   isPrivateHost,
   endpointSecurityWarnings,
@@ -121,11 +122,24 @@ describe("Fix 6: clampMode / clampLocalTimeoutMs", () => {
 // ---------------------------------------------------------------------------
 
 describe("Fix 3: meeting URL is opt-in", () => {
-  test("meetingUrlForVars hides the URL unless includeMeetingUrl is on", () => {
-    assert.equal(meetingUrlForVars({ includeMeetingUrl: false }, "https://meet/x"), "");
-    assert.equal(meetingUrlForVars({}, "https://meet/x"), "");
-    assert.equal(meetingUrlForVars({ includeMeetingUrl: true }, "https://meet/x"), "https://meet/x");
+  test("originOf strips path/query, keeps scheme+host", () => {
+    assert.equal(originOf("https://meet.google.com/abc-defg-hij?x=1"), "https://meet.google.com");
+    assert.equal(originOf("https://teams.microsoft.com/l/meetup-join/9"), "https://teams.microsoft.com");
+    assert.equal(originOf("garbage"), "");
+    assert.equal(originOf(""), "");
+  });
+
+  test("meetingUrlForVars sends origin-only when off, full URL when on", () => {
+    const full = "https://meet.google.com/abc-defg-hij";
+    // off → origin only (host shared, meeting ID withheld)
+    assert.equal(meetingUrlForVars({ includeMeetingUrl: false }, full), "https://meet.google.com");
+    assert.equal(meetingUrlForVars({}, full), "https://meet.google.com");
+    // on → full URL incl. meeting ID
+    assert.equal(meetingUrlForVars({ includeMeetingUrl: true }, full), full);
+    // empty / unparseable → nothing
+    assert.equal(meetingUrlForVars({ includeMeetingUrl: false }, ""), "");
     assert.equal(meetingUrlForVars({ includeMeetingUrl: true }, null), "");
+    assert.equal(meetingUrlForVars({ includeMeetingUrl: false }, "not a url"), "");
   });
 
   test("buildListenerUrl substitutes tokens when present", () => {

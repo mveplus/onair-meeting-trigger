@@ -133,10 +133,10 @@ You can use these in HTTP Hook URLs or bodies:
 
 - `{state}` → `ON` or `OFF`
 - `{service}` → `meet`, `teams`, `zoom` (or `test` during Test buttons)
-- `{url}` → the meeting tab URL — **only when "Include the meeting tab URL in
-  requests" is enabled in Settings** (off by default; otherwise `{url}` resolves
-  to an empty string and the auto-appended `url=` param is omitted, so meeting
-  IDs never leave the browser)
+- `{url}` → the meeting URL. By default (the **"Include the full meeting URL"**
+  setting off) this is the **site origin only**, e.g. `https://meet.google.com` —
+  the host is shared but the meeting ID never leaves the browser. Enable the
+  setting to send the **full** URL including the meeting ID.
 - `{ts}` → timestamp (unix ms)
 
 ## Adding your own templates (developers)

@@ -148,10 +148,25 @@ export function buildListenerUrl(rawUrl, vars = {}) {
   return u.toString();
 }
 
-// Resolve the meeting URL that should be exposed to templates, honoring
-// the includeMeetingUrl opt-in (Fix 3). Defaults to NOT leaking the URL.
+// Scheme + host of a URL, with the path/query (where the meeting ID
+// lives) stripped. "" for anything unparseable.
+export function originOf(url) {
+  try {
+    const o = new URL(url).origin;
+    return o === "null" ? "" : o;
+  } catch {
+    return "";
+  }
+}
+
+// Resolve the meeting URL exposed to templates, honoring the
+// includeMeetingUrl opt-in (Fix 3):
+//   on  → the full URL (path/query included — i.e. the meeting ID)
+//   off → the origin only (e.g. https://meet.google.com), so the host is
+//         shared but the meeting ID never leaves the browser
 export function meetingUrlForVars(cfg, rawUrl) {
-  return cfg?.includeMeetingUrl ? (rawUrl || "") : "";
+  if (!rawUrl) return "";
+  return cfg?.includeMeetingUrl ? rawUrl : originOf(rawUrl);
 }
 
 // ---- http hook success evaluation (Fix 4) -----------------------------

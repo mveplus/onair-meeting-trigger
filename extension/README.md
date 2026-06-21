@@ -143,8 +143,9 @@ In Listener and HTTP Hook targets, you can use:
 
 - `{state}` → `ON` or `OFF`
 - `{service}` → `meet`, `teams`, `zoom` (or `test` during Test buttons)
-- `{url}` → the meeting tab URL — empty unless **Include the meeting tab URL in
-  requests** is enabled in Settings (off by default, so meeting IDs are not sent)
+- `{url}` → the meeting URL. Off by default it's the **site origin only**
+  (e.g. `https://meet.google.com`, no meeting ID); enable **Include the full
+  meeting URL** in Settings to send the complete URL
 - `{ts}` → timestamp (unix ms)
 
 ---
