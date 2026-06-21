@@ -1107,38 +1107,6 @@ function btoaSafe(s) {
   try { return btoa(s); } catch { return ""; }
 }
 
-async function testAll(state) {
-  const { config } = await chrome.storage.sync.get({ config: DEFAULTS });
-  const cfg = migrateIfNeeded(config);
-
-  const vars = { state, service: "test", url: "", ts: Date.now() };
-  const timeoutMs = Math.max(1, Math.min(20, parseInt(cfg.timeoutSec ?? 3, 10))) * 1000;
-
-  const jobs = (cfg.targets || []).filter(t => t.enabled).map(async (t) => {
-    if (t.type === "listener") {
-      const url = buildListenerUrl(t.url, vars);
-      if (!url) return { ok:false, name:t.id };
-      return fetchWithTimeout(url, { method:"GET" }, timeoutMs).then(ok => ({ ok, name:t.id }));
-    }
-
-    if (t.type === "simpleLed") {
-      const base = trimSlash(t.baseUrl || "");
-      if (!base) return { ok:false, name:t.id };
-      const url = base + (state === "ON" ? "/led/on" : "/led/off");
-      return fetchWithTimeout(url, { method:"GET" }, timeoutMs).then(ok => ({ ok, name:t.id }));
-    }
-
-    // httpHook
-    const ok = await testHttpHookTarget(t, vars, timeoutMs, state);
-    return { ok, name: t.id };
-  });
-
-  const res = await Promise.allSettled(jobs);
-  const okCount = res.filter(r => r.status === "fulfilled" && r.value.ok).length;
-  const total = res.length;
-  showStatus(`Test ${state}: ${okCount}/${total} OK`, okCount === total);
-}
-
 async function fetchWithTimeout(url, opts, timeoutMs, checkStatus = true) {
   for (let attempt = 0; attempt <= RETRY_MAX; attempt++) {
     const ac = new AbortController();
@@ -1238,8 +1206,6 @@ async function fetchWithTimeoutResult(url, opts, timeoutMs) {
 
 $("save").addEventListener("click", save);
 $("savebar_save").addEventListener("click", save);
-$("test_on").addEventListener("click", () => testAll("ON"));
-$("test_off").addEventListener("click", () => testAll("OFF"));
 
 // Any edit anywhere in the form re-checks the unsaved-changes state.
 document.addEventListener("input", refreshDirty);
