@@ -129,7 +129,7 @@ After importing, click **Save** to persist changes and permissions.
 
 ## Templates
 
-The settings UI includes **templates** for common targets. Pick a template and click **Add from Template** to prefill URLs, headers, and method.
+The settings UI includes an **Add a target…** dropdown for common targets. Pick a **Blank** HTTP Hook / Listener or a **From template** preset, then click **Add** to prefill URLs, headers, and method.
 
 See the full guide:
 

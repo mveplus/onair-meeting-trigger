@@ -25,7 +25,9 @@ import {
   hasSecrets,
   resolveExportSecrets,
   exportFileName,
-  formatBuildBadge
+  formatBuildBadge,
+  BLANK_CHOICES,
+  resolveAddChoice
 } from "../extension/shared.js";
 
 // ---------------------------------------------------------------------------
@@ -371,5 +373,34 @@ describe("dev build badge: formatBuildBadge", () => {
     assert.equal(formatBuildBadge({ branch: "HEAD", commit: "abc" }, "0.3.7"), null); // detached (CI/tag)
     assert.equal(formatBuildBadge({ branch: "unknown", commit: "abc" }, "0.3.7"), null);
     assert.equal(formatBuildBadge({ branch: "", commit: "abc" }, "0.3.7"), null);
+  });
+});
+
+describe('"Add target" dropdown: resolveAddChoice', () => {
+  const templates = {
+    tasmota: { label: "Tasmota (GET)", target: { type: "httpHook" } },
+    aws_iot_lambda: { label: "Cloud Bridge", target: { type: "iotHybrid" } }
+  };
+
+  test("placeholder maps to a no-op", () => {
+    assert.deepEqual(resolveAddChoice("", templates), { kind: "none" });
+  });
+
+  test("blank choices add an empty target of the right type", () => {
+    assert.deepEqual(resolveAddChoice("__blank_httpHook", templates), { kind: "blank", type: "httpHook" });
+    assert.deepEqual(resolveAddChoice("__blank_listener", templates), { kind: "blank", type: "listener" });
+  });
+
+  test("template choices carry the template key and its target type", () => {
+    assert.deepEqual(resolveAddChoice("tasmota", templates), { kind: "template", templateKey: "tasmota", type: "httpHook" });
+    assert.deepEqual(resolveAddChoice("aws_iot_lambda", templates), { kind: "template", templateKey: "aws_iot_lambda", type: "iotHybrid" });
+  });
+
+  test("unrecognized values resolve to 'unknown'", () => {
+    assert.deepEqual(resolveAddChoice("does_not_exist", templates), { kind: "unknown" });
+  });
+
+  test("BLANK_CHOICES covers the two former add buttons", () => {
+    assert.deepEqual(Object.values(BLANK_CHOICES).map(c => c.type).sort(), ["httpHook", "listener"]);
   });
 });

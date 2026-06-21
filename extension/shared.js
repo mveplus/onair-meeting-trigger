@@ -314,6 +314,30 @@ export function exportFileName(includesSecrets) {
   return includesSecrets ? "onair-settings-with-secrets.json" : "onair-settings.json";
 }
 
+// ---- "Add target" dropdown choices ------------------------------------
+
+// Synthetic dropdown entries that add a blank target instead of a
+// pre-filled template — these fold the old "Add HTTP Hook" / "Add local
+// Listener" buttons into the single template <select>.
+export const BLANK_CHOICES = {
+  __blank_httpHook: { type: "httpHook", label: "Blank HTTP Hook" },
+  __blank_listener: { type: "listener", label: "Blank Listener" }
+};
+
+// Resolve a dropdown selection into an add action. Kinds:
+//   "none"     — placeholder selected, nothing to do
+//   "blank"    — add an empty target of `type`
+//   "template" — add `type` pre-filled from templates[templateKey]
+//   "unknown"  — value matched nothing (stale/garbage selection)
+export function resolveAddChoice(value, templates) {
+  if (!value) return { kind: "none" };
+  const blank = BLANK_CHOICES[value];
+  if (blank) return { kind: "blank", type: blank.type };
+  const tpl = templates?.[value];
+  if (!tpl) return { kind: "unknown" };
+  return { kind: "template", templateKey: value, type: tpl.target?.type || "httpHook" };
+}
+
 // ---- dev build badge ---------------------------------------------------
 
 // Format the "you're running an unpacked dev build" label from the git

@@ -17,7 +17,9 @@ import {
   applySecrets,
   resolveExportSecrets,
   exportFileName,
-  formatBuildBadge
+  formatBuildBadge,
+  BLANK_CHOICES,
+  resolveAddChoice
 } from "./shared.js";
 
 const DEFAULTS = {
@@ -1205,34 +1207,47 @@ $("save").addEventListener("click", save);
 $("test_on").addEventListener("click", () => testAll("ON"));
 $("test_off").addEventListener("click", () => testAll("OFF"));
 
-$("add_listener").addEventListener("click", () => addTarget("listener"));
-$("add_hook").addEventListener("click", () => addTarget("httpHook"));
 $("add_custom_service").addEventListener("click", addCustomService);
 $("add_template").addEventListener("click", () => {
-  const key = $("target_template").value;
-  if (!key) return showStatus("Pick a template first", false);
-  if (!TEMPLATES[key]) return showStatus(`Unknown template '${key}'`, false);
+  // The dropdown now covers both blank targets (formerly the "Add HTTP
+  // Hook" / "Add local Listener" buttons) and pre-filled templates; the
+  // pure resolveAddChoice tells us which action the selection maps to.
+  const choice = resolveAddChoice($("target_template").value, TEMPLATES);
+  if (choice.kind === "none") return showStatus("Pick something to add first", false);
+  if (choice.kind === "unknown") return showStatus("Unknown selection", false);
   // Templates may carry a `target.type` other than httpHook (e.g.
-  // iotHybrid). Route through addTarget with the template's own type so
-  // the right add-branch picks up its fields.
-  const tplType = TEMPLATES[key].target?.type || "httpHook";
-  addTarget(tplType, key);
+  // iotHybrid). Either way addTarget(type, templateKey?) picks the right
+  // branch; a blank choice has no templateKey.
+  addTarget(choice.type, choice.templateKey || "");
 });
 
-// Build the template <select> from the TEMPLATES object so that adding
-// a new entry is a single-file change in options.js. Placeholder
-// <option> stays in the static markup; everything below it is
-// regenerated here at load time.
+// Build the "Add a target…" <select> from BLANK_CHOICES + the TEMPLATES
+// object so adding an entry is a single-file change. Blanks go in their
+// own optgroup above the templates.
 function populateTemplateDropdown() {
   const sel = $("target_template");
   if (!sel) return;
-  sel.innerHTML = '<option value="">Template: Select one…</option>';
+  sel.innerHTML = '<option value="">Add a target…</option>';
+
+  const blanks = document.createElement("optgroup");
+  blanks.label = "Blank";
+  for (const [value, def] of Object.entries(BLANK_CHOICES)) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = def.label;
+    blanks.appendChild(opt);
+  }
+  sel.appendChild(blanks);
+
+  const tpls = document.createElement("optgroup");
+  tpls.label = "From template";
   for (const [key, def] of Object.entries(TEMPLATES)) {
     const opt = document.createElement("option");
     opt.value = key;
     opt.textContent = def.label || key;
-    sel.appendChild(opt);
+    tpls.appendChild(opt);
   }
+  sel.appendChild(tpls);
 }
 populateTemplateDropdown();
 

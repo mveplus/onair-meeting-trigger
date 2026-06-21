@@ -475,22 +475,20 @@
     <div class="card">
       <h2>Targets (LAN / local outputs)</h2>
       <div class="btns">
-        <button id="add_hook">Add HTTP Hook</button>
-        <button id="add_listener">Add local Listener</button>
         <select id="target_template" class="selectButton compact">
-          <option value="">Template: Select one…</option>
-          <!-- Entries are appended at runtime by populateTemplateDropdown()
-               in options.js, so the JS TEMPLATES object is the single
-               source of truth for the dropdown contents. -->
+          <option value="">Add a target…</option>
+          <!-- Blank-target and template options are appended at runtime by
+               populateTemplateDropdown() in options.js (BLANK_CHOICES +
+               the TEMPLATES object are the single source of truth). -->
         </select>
-        <button id="add_template">Add from Template</button>
+        <button id="add_template">Add</button>
+        <button id="import_hooks">Import Settings</button>
+        <input type="file" id="import_hooks_file" accept="application/json" style="display:none" />
         <button id="export_hooks">Export Settings</button>
         <label class="muted" style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;"
                title="Off (default): tokens/passwords are stripped from the exported file. On: they are written in plaintext — keep the file private.">
           <input type="checkbox" id="export_secrets"> Include secrets
         </label>
-        <button id="import_hooks">Import Settings</button>
-        <input type="file" id="import_hooks_file" accept="application/json" style="display:none" />
       </div>
 
       <div id="targets"></div>

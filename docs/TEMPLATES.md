@@ -7,8 +7,9 @@ cloud-bridge and local-first templates are `iotHybrid` targets.
 ## Using templates in the UI
 
 1. Open Settings → Targets.
-2. Pick a template from the **Template** dropdown.
-3. Click **Add from Template**.
+2. Pick an entry from the **Add a target…** dropdown — either a **Blank**
+   HTTP Hook / Listener, or one of the **From template** presets.
+3. Click **Add**.
 4. Adjust URLs, headers, or body as needed.
 
 ## Current templates
