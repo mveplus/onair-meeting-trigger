@@ -289,3 +289,27 @@ export function applySecrets(cfg, secrets = {}) {
 export function redactSecrets(cfg) {
   return extractSecrets(cfg).config;
 }
+
+// True if any target carries a credential we'd otherwise keep out of
+// synced storage / exports.
+export function hasSecrets(targets) {
+  return Object.keys(extractSecrets({ targets: targets || [] }).secrets).length > 0;
+}
+
+// Decide what an export should contain. `wantSecrets` is the user's
+// opt-in (the "Include secrets" checkbox). Secrets are only ever
+// included when they both exist AND the user asked for them; otherwise
+// the returned targets are credential-free. The UI layer is left to do
+// the confirm() prompt and the actual download.
+export function resolveExportSecrets(targets, wantSecrets) {
+  const present = hasSecrets(targets);
+  const includesSecrets = present && !!wantSecrets;
+  const outTargets = includesSecrets
+    ? (targets || [])
+    : (redactSecrets({ targets: targets || [] }).targets || []);
+  return { hasSecrets: present, includesSecrets, targets: outTargets };
+}
+
+export function exportFileName(includesSecrets) {
+  return includesSecrets ? "onair-settings-with-secrets.json" : "onair-settings.json";
+}

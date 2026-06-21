@@ -15,7 +15,8 @@ import {
   endpointSecurityWarnings,
   extractSecrets,
   applySecrets,
-  redactSecrets
+  resolveExportSecrets,
+  exportFileName
 } from "./shared.js";
 
 const DEFAULTS = {
@@ -891,14 +892,14 @@ function exportHooks() {
   const iconMode = $("icon_mode").value || DEFAULTS.iconMode;
 
   // Fix 1 + user choice: credentials are excluded by default. The user
-  // can opt in via the "Include secrets" checkbox, and either way we pop
-  // a confirm so the consequence is never silent.
-  const allTargets = cfg.targets || [];
-  const hasSecrets = Object.keys(extractSecrets({ targets: allTargets }).secrets).length > 0;
+  // can opt in via the "Include secrets" checkbox; the pure decision
+  // (what gets included) lives in resolveExportSecrets so it's testable.
   const wantSecrets = $("export_secrets")?.checked === true;
-  const includeSecrets = hasSecrets && wantSecrets;
+  const { hasSecrets: secretsPresent, includesSecrets: includeSecrets, targets: sourceTargets } =
+    resolveExportSecrets(cfg.targets || [], wantSecrets);
 
-  if (hasSecrets) {
+  // Either way, never let the consequence be silent.
+  if (secretsPresent) {
     const ok = includeSecrets
       ? confirm(
           "⚠️ Include secrets is ON.\n\n" +
@@ -915,7 +916,6 @@ function exportHooks() {
     if (!ok) return showStatus("Export cancelled", false);
   }
 
-  const sourceTargets = includeSecrets ? allTargets : (redactSecrets({ targets: allTargets }).targets || []);
   const targets = sourceTargets.map(t => {
     if (t.type === "listener") {
       return { type: "listener", url: t.url || "", enabled: t.enabled !== false };
@@ -978,13 +978,13 @@ function exportHooks() {
   const a = document.createElement("a");
   a.href = url;
   // Name the file so a secret-bearing export is obvious on disk.
-  a.download = includeSecrets ? "onair-settings-with-secrets.json" : "onair-settings.json";
+  a.download = exportFileName(includeSecrets);
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
   const note = includeSecrets ? " — ⚠️ includes secrets (keep private)"
-    : hasSecrets ? " — credentials excluded (re-enter after import)"
+    : secretsPresent ? " — credentials excluded (re-enter after import)"
     : "";
   showStatus(`Exported ${targets.length} target(s)${note}`);
 }

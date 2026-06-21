@@ -21,7 +21,10 @@ import {
   endpointSecurityWarnings,
   extractSecrets,
   applySecrets,
-  redactSecrets
+  redactSecrets,
+  hasSecrets,
+  resolveExportSecrets,
+  exportFileName
 } from "../extension/shared.js";
 
 // ---------------------------------------------------------------------------
@@ -292,5 +295,49 @@ describe("Fix 1: secret splitting & export redaction", () => {
     assert.equal(blob.includes('"P"'), false);
     // original object not mutated
     assert.equal(original.targets[0].cloudToken, "CT");
+  });
+});
+
+describe("Fix 1 (export decision): hasSecrets / resolveExportSecrets / exportFileName", () => {
+  const withSecrets = () => [
+    { id: "iot1", type: "iotHybrid", localToken: "LT", cloudToken: "CT", cloudBase: "https://a", thing: "x" }
+  ];
+  const noSecrets = () => [
+    { id: "led1", type: "simpleLed", baseUrl: "http://192.168.1.5" }
+  ];
+
+  test("hasSecrets detects credential-bearing targets", () => {
+    assert.equal(hasSecrets(withSecrets()), true);
+    assert.equal(hasSecrets(noSecrets()), false);
+    assert.equal(hasSecrets([]), false);
+    assert.equal(hasSecrets(undefined), false);
+  });
+
+  test("default export (wantSecrets=false) strips credentials", () => {
+    const r = resolveExportSecrets(withSecrets(), false);
+    assert.equal(r.hasSecrets, true);
+    assert.equal(r.includesSecrets, false);
+    const blob = JSON.stringify(r.targets);
+    assert.equal(blob.includes("LT"), false);
+    assert.equal(blob.includes("CT"), false);
+  });
+
+  test("opt-in export (wantSecrets=true) keeps credentials", () => {
+    const r = resolveExportSecrets(withSecrets(), true);
+    assert.equal(r.hasSecrets, true);
+    assert.equal(r.includesSecrets, true);
+    assert.equal(r.targets[0].localToken, "LT");
+    assert.equal(r.targets[0].cloudToken, "CT");
+  });
+
+  test("opt-in has no effect when there are no secrets to include", () => {
+    const r = resolveExportSecrets(noSecrets(), true);
+    assert.equal(r.hasSecrets, false);
+    assert.equal(r.includesSecrets, false); // nothing to include
+  });
+
+  test("exportFileName flags secret-bearing files", () => {
+    assert.equal(exportFileName(true), "onair-settings-with-secrets.json");
+    assert.equal(exportFileName(false), "onair-settings.json");
   });
 });
