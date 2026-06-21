@@ -24,7 +24,8 @@ import {
   redactSecrets,
   hasSecrets,
   resolveExportSecrets,
-  exportFileName
+  exportFileName,
+  formatBuildBadge
 } from "../extension/shared.js";
 
 // ---------------------------------------------------------------------------
@@ -339,5 +340,36 @@ describe("Fix 1 (export decision): hasSecrets / resolveExportSecrets / exportFil
   test("exportFileName flags secret-bearing files", () => {
     assert.equal(exportFileName(true), "onair-settings-with-secrets.json");
     assert.equal(exportFileName(false), "onair-settings.json");
+  });
+});
+
+describe("dev build badge: formatBuildBadge", () => {
+  test("renders version-dev · branch @ commit for a feature branch", () => {
+    assert.equal(
+      formatBuildBadge({ branch: "feature-x", commit: "abc1234", dirty: false }, "0.3.7"),
+      "v0.3.7-dev · feature-x @ abc1234"
+    );
+  });
+
+  test("marks a dirty working tree with *", () => {
+    assert.equal(
+      formatBuildBadge({ branch: "feature-x", commit: "abc1234", dirty: true }, "0.3.7"),
+      "v0.3.7-dev · feature-x @ abc1234*"
+    );
+  });
+
+  test("falls back to 'dev' when no version is given", () => {
+    assert.equal(
+      formatBuildBadge({ branch: "wip", commit: "deadbee" }, undefined),
+      "dev · wip @ deadbee"
+    );
+  });
+
+  test("renders nothing for main / detached / unknown / missing info", () => {
+    assert.equal(formatBuildBadge(null, "0.3.7"), null);
+    assert.equal(formatBuildBadge({ branch: "main", commit: "abc" }, "0.3.7"), null);
+    assert.equal(formatBuildBadge({ branch: "HEAD", commit: "abc" }, "0.3.7"), null); // detached (CI/tag)
+    assert.equal(formatBuildBadge({ branch: "unknown", commit: "abc" }, "0.3.7"), null);
+    assert.equal(formatBuildBadge({ branch: "", commit: "abc" }, "0.3.7"), null);
   });
 });

@@ -20,7 +20,7 @@ extension/         The MV3 extension (this is what ships)
   icons/
 tests/             Node built-in test runner specs for shared.js (`npm test`)
 package.json       `type:module`; `npm test` → `node --test`
-scripts/           Release tooling (build-zip.sh, release.sh)
+scripts/           Release tooling (build-zip.sh, release.sh, gen-build-info.sh)
 .github/workflows/release.yml   Tag-triggered release + Chrome Web Store upload
 VERSION            Mirror of manifest version, bumped by release.sh
 docs/, resources/  Documentation and store assets
@@ -44,6 +44,13 @@ docs/, resources/  Documentation and store assets
 - **MV3 reliability:** a 1-minute `chrome.alarms` reconcile heartbeat
   (`alarms` permission) re-derives state so a suspended worker can't leave the
   sign stale; the 400 ms `setTimeout` debounce is kept for sub-second coalescing.
+- **Dev build badge:** `scripts/gen-build-info.sh` writes the gitignored
+  `extension/build-info.json` (commit/branch/dirty); `build-zip.sh` runs it
+  before zipping. The popup and options page fetch it and render
+  `formatBuildBadge` — a `vX-dev · branch @ commit` label that shows **only** for
+  unpacked builds off a non-`main` branch (detached HEAD / release / store
+  installs render nothing). Run `scripts/gen-build-info.sh` after switching
+  branches to refresh it.
 
 ## Tests
 

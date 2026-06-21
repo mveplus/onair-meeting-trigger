@@ -313,3 +313,20 @@ export function resolveExportSecrets(targets, wantSecrets) {
 export function exportFileName(includesSecrets) {
   return includesSecrets ? "onair-settings-with-secrets.json" : "onair-settings.json";
 }
+
+// ---- dev build badge ---------------------------------------------------
+
+// Format the "you're running an unpacked dev build" label from the git
+// metadata that scripts/gen-build-info.sh writes into build-info.json.
+// Returns null (→ render nothing) for the cases that should look like a
+// normal install: no build info, the main branch, a detached HEAD (CI /
+// release tag builds), or unknown git state. `version` is the manifest
+// version, marked `-dev` to distinguish it from a store build.
+export function formatBuildBadge(info, version) {
+  if (!info) return null;
+  const branch = String(info.branch || "").trim();
+  if (!branch || branch === "main" || branch === "HEAD" || branch === "unknown") return null;
+  const commit = String(info.commit || "").trim() || "unknown";
+  const v = version ? `v${version}-dev` : "dev";
+  return `${v} · ${branch} @ ${commit}${info.dirty ? "*" : ""}`;
+}

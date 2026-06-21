@@ -1,0 +1,8 @@
+# Build artifacts
+dist.zip
+
+# Generated per-build dev metadata (see scripts/gen-build-info.sh)
+extension/build-info.json
+
+# Node
+node_modules/

@@ -16,7 +16,8 @@ import {
   extractSecrets,
   applySecrets,
   resolveExportSecrets,
-  exportFileName
+  exportFileName,
+  formatBuildBadge
 } from "./shared.js";
 
 const DEFAULTS = {
@@ -1247,6 +1248,24 @@ function applyTheme(theme) {
   document.body.dataset.theme = theme === "dark" ? "dark" : "light";
 }
 
+// Show a "vX-dev · branch @ commit" badge for unpacked dev builds off a
+// non-main branch. build-info.json is absent in store/release installs,
+// so this no-ops there. See scripts/gen-build-info.sh + formatBuildBadge.
+async function showBuildBadge() {
+  try {
+    const res = await fetch(chrome.runtime.getURL("build-info.json"), { cache: "no-store" });
+    if (!res.ok) return;
+    const info = await res.json();
+    const label = formatBuildBadge(info, chrome.runtime.getManifest().version);
+    if (!label) return;
+    const el = $("build_badge");
+    el.textContent = label;
+    el.style.display = "inline-block";
+  } catch {
+    // no build info — render nothing
+  }
+}
+
 $("theme_switch").addEventListener("change", () => applyTheme($("theme_switch").checked ? "dark" : "light"));
 
 function updateIconPreview() {
@@ -1272,3 +1291,4 @@ document.querySelectorAll(".timeout-pill").forEach(btn => {
 });
 
 load();
+showBuildBadge();

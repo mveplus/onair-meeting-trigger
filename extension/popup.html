@@ -39,6 +39,18 @@
     .off { background: var(--pill-bg); }
     .muted { color: var(--muted); font-size: 12px; margin-top: 8px; }
     button { padding: 6px 10px; border-radius: 10px; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--ink); cursor: pointer; }
+    .buildBadge {
+      display: none;
+      margin-top: 10px;
+      padding: 4px 8px;
+      border-radius: 8px;
+      border: 1px dashed var(--btn-border);
+      background: var(--pill-bg);
+      color: var(--muted);
+      font-size: 11px;
+      font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
@@ -55,6 +67,7 @@
     <button id="refresh">Refresh</button>
   </div>
   <div class="muted" id="icon_hint" style="display:none;">Grayscale icon = OFF. Color icon = ON.</div>
-  <script src="popup.js"></script>
+  <div class="buildBadge" id="build_badge" title="Unpacked dev build — git branch @ commit"></div>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>
