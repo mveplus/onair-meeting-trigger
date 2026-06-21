@@ -341,7 +341,18 @@
       transition: opacity 0.2s ease;
       z-index: 3;
     }
-    .infoTip:hover::after { opacity: 1; }
+    .infoTip:hover::after, .infoTip:focus::after { opacity: 1; }
+    /* Wide variant for longer help text: wrap instead of one long line,
+       and anchor to the icon's right edge so it can't run off-screen. */
+    .infoTip.wide::after {
+      white-space: normal;
+      width: 280px;
+      left: auto;
+      right: 0;
+      transform: none;
+      text-align: left;
+      line-height: 1.4;
+    }
     .pillGroup {
       display:flex;
       gap: 6px;
@@ -527,14 +538,12 @@
 
       <div class="prefRow">
         <div class="prefLabel"><b>Privacy</b><span class="muted">Meeting URL</span></div>
-        <label class="checkItem" style="margin:0; cursor:pointer; border:none; padding:0; background:none;">
+        <label class="checkItem" style="margin:0;">
           <input type="checkbox" id="include_meeting_url">
           <span class="checkBox"></span>
-          <span>Include the full meeting URL (with meeting ID) in requests
-            <span class="muted">(off by default — when off, <code>{url}</code> is just the
-            site origin like <code>https://meet.google.com</code>, so the host is shared but
-            the meeting ID never leaves the browser)</span></span>
+          <span>Include the full meeting URL (with meeting ID) in requests</span>
         </label>
+        <span class="infoTip wide" tabindex="0" data-tip="Off by default. When off, {url} is just the site origin (e.g. https://meet.google.com) — the host is shared but the meeting ID never leaves the browser. Turn on to send the complete URL including the meeting ID.">?</span>
       </div>
 
       <div class="prefRow">
@@ -563,9 +572,11 @@
         <button id="import_hooks">Import Settings</button>
         <input type="file" id="import_hooks_file" accept="application/json" style="display:none" />
         <button id="export_hooks">Export Settings</button>
-        <label class="muted" style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;"
+        <label class="checkItem" style="margin:0;"
                title="Off (default): tokens/passwords are stripped from the exported file. On: they are written in plaintext — keep the file private.">
-          <input type="checkbox" id="export_secrets"> Include secrets
+          <input type="checkbox" id="export_secrets">
+          <span class="checkBox"></span>
+          <span>Include secrets</span>
         </label>
       </div>
 
