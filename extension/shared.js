@@ -456,7 +456,8 @@ export function settingsSignature(cfg) {
     timeoutSec: clampTimeoutSec(c.timeoutSec, 3),
     iconMode: c.iconMode || "alwaysColor",
     includeMeetingUrl: !!c.includeMeetingUrl,
-    theme: c.theme === "dark" ? "dark" : "light",
+    // `theme` is intentionally excluded: it's persisted instantly when the
+    // user toggles it, so it must never count as an "unsaved change".
     customServices: (c.customServices || []).map(s => ({
       name: String(s.name || ""), enabled: s.enabled !== false, prefixes: [...(s.prefixes || [])]
     })),
