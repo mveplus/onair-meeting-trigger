@@ -439,7 +439,9 @@ function renderTargets(cfg) {
   (cfg.targets || []).forEach((t, idx) => {
     const typeLabel = t.type === "listener" ? "Listener"
       : t.type === "simpleLed" ? "Simple LED"
-      : t.type === "iotHybrid" ? "IoT (local + cloud)"
+      // A cloud-only iotHybrid (no local URL) is just the AWS bridge; only
+      // call it "local + cloud" once a LAN path is actually configured.
+      : t.type === "iotHybrid" ? (t.localBase ? "IoT (local + cloud)" : "Cloud Bridge (AWS IoT Lambda)")
       : "HTTP";
 
     const div = document.createElement("div");
@@ -499,25 +501,18 @@ function renderTargets(cfg) {
       const modeOpts = [[0, "off"], [1, "on"], [2, "breathing"]];
       const modeOn = Number(t.modeOn ?? 1);
       const modeOff = Number(t.modeOff ?? 0);
+      // The cloud (AWS IoT Lambda) bridge is the primary, always-visible
+      // path. The optional LAN-first path lives in a <details> that opens
+      // automatically once a local base URL is set, so a cloud-only row
+      // stays uncluttered without hiding the inputs for good.
+      const hasLocal = !!(t.localBase || t.localToken);
       body.innerHTML = `
-        <div class="row">
-          <div>
-            <label>Local base URL
-              <input type="text" class="t_localBase" placeholder="http://10.37.22.98" value="${esc(t.localBase || "")}">
-            </label>
-            <label>Local API token (<code>X-API-Token</code>)
-              <input type="password" class="t_localToken" placeholder="device API token" value="${esc(t.localToken || "")}" autocomplete="off" spellcheck="false">
-            </label>
-          </div>
-          <div>
-            <label>Cloud endpoint URL
-              <input type="text" class="t_cloudBase" placeholder="https://API_ID.execute-api.eu-west-1.amazonaws.com" value="${esc(t.cloudBase || "")}">
-            </label>
-            <label>Cloud bearer token (<code>Authorization</code>)
-              <input type="password" class="t_cloudToken" placeholder="bearer token" value="${esc(t.cloudToken || "")}" autocomplete="off" spellcheck="false">
-            </label>
-          </div>
-        </div>
+        <label>Cloud endpoint URL
+          <input type="text" class="t_cloudBase" placeholder="https://API_ID.execute-api.eu-west-1.amazonaws.com" value="${esc(t.cloudBase || "")}">
+        </label>
+        <label>Cloud bearer token (<code>Authorization</code>)
+          <input type="password" class="t_cloudToken" placeholder="bearer token" value="${esc(t.cloudToken || "")}" autocomplete="off" spellcheck="false">
+        </label>
         <label>AWS IoT thing
           <input type="text" class="t_thing" placeholder="onair-test-1" value="${esc(t.thing || "")}">
         </label>
@@ -537,10 +532,20 @@ function renderTargets(cfg) {
             </label>
           </div>
         </div>
-        <label>Local timeout before cloud fallback (ms)
-          <input type="number" class="t_localTimeoutMs" min="100" max="10000" value="${Number(t.localTimeoutMs ?? 1500)}">
-        </label>
-        <div class="muted">On every event, the extension fires <em>one</em> request to the local API (no retries, single fetch inside the timeout above). If it doesn't return 2xx in time, the cloud endpoint takes over. Exactly one of the two paths actually flips the sign per event — no duplicate commands.</div>
+        <details class="advanced" ${hasLocal ? "open" : ""}>
+          <summary>Local-first LAN path (optional)</summary>
+          <div class="muted" style="margin-bottom:8px;">Fill this in to try the device on your LAN first and only fall back to the cloud bridge above when it's unreachable. Leave blank for a cloud-only setup.</div>
+          <label>Local base URL
+            <input type="text" class="t_localBase" placeholder="http://10.37.22.98" value="${esc(t.localBase || "")}">
+          </label>
+          <label>Local API token (<code>X-API-Token</code>)
+            <input type="password" class="t_localToken" placeholder="device API token" value="${esc(t.localToken || "")}" autocomplete="off" spellcheck="false">
+          </label>
+          <label>Local timeout before cloud fallback (ms)
+            <input type="number" class="t_localTimeoutMs" min="100" max="10000" value="${Number(t.localTimeoutMs ?? 1500)}">
+          </label>
+        </details>
+        <div class="muted">On every event the extension fires <em>one</em> request${hasLocal ? " to the local API (single fetch, no retries, capped by the timeout above); if it doesn't return 2xx in time the cloud endpoint takes over" : " to the cloud endpoint"}. Exactly one path flips the sign per event — no duplicate commands.</div>
       `;
     } else {
       // httpHook
