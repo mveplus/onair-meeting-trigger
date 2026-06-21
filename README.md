@@ -21,7 +21,8 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 - Custom service detection (user-defined URL prefixes)
 - HTTP hooks (Home Assistant, Tasmota, Shelly, ESP)
 - **IoT (local + cloud)** target type — tries the device's local HTTP API first and transparently falls back to **your own** AWS IoT MQTT publish (via your own API Gateway + Lambda) when off-LAN. Bring-your-own-cloud, no third-party in the loop.
-- Redesigned settings UI
+- Toolbar popup with at-a-glance ON-AIR status and one-click **Pause** (1 hour / until you resume)
+- Redesigned settings UI with an unsaved-changes save bar
 - Built-in templates for common targets, including OnAir Cloud Bridge (AWS IoT Lambda) — pick solid or breathing from the ON-mode dropdown — plus a local-first-hybrid variant
 - Import/export settings (includes trigger mode, timeout, toolbar icon mode) — credentials are excluded from exports
 - Flatpak / Snap compatible
