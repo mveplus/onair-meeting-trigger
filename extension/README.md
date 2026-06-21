@@ -129,7 +129,7 @@ After importing, click **Save** to persist changes and permissions.
 
 ## Templates
 
-The settings UI includes **templates** for common targets. Pick a template and click **Add from Template** to prefill URLs, headers, and method.
+The settings UI includes an **Add a target…** dropdown for common targets. Pick a **Blank** HTTP Hook / Listener or a **From template** preset, then click **Add** to prefill URLs, headers, and method.
 
 See the full guide:
 
@@ -143,7 +143,9 @@ In Listener and HTTP Hook targets, you can use:
 
 - `{state}` → `ON` or `OFF`
 - `{service}` → `meet`, `teams`, `zoom` (or `test` during Test buttons)
-- `{url}` → the meeting tab URL (when available)
+- `{url}` → the meeting URL. Off by default it's the **site origin only**
+  (e.g. `https://meet.google.com`, no meeting ID); enable **Include the full
+  meeting URL** in Settings to send the complete URL
 - `{ts}` → timestamp (unix ms)
 
 ---
@@ -177,7 +179,11 @@ When a tab URL starts with any of those prefixes, the extension will report
 
 ## Permissions
 
-The extension requests host permissions **only for the targets you configure**, for example:
+Declared permissions: `storage`, `tabs`, `alarms` (the alarm drives a
+once-a-minute reconcile so a suspended service worker can't leave the sign
+stuck out of sync).
+
+Host permissions are requested **only for the targets you configure**, for example:
 - `http://127.0.0.1/*`
 - `http://192.168.1.17/*`
 
@@ -185,15 +191,40 @@ You’ll be prompted to allow these when you save settings.
 
 ---
 
+## Credential storage & privacy
+
+- Tokens and passwords (`localToken`, `cloudToken`, HTTP Basic password, and
+  `Authorization` / `X-API-Token` header values) are kept in
+  `chrome.storage.local` and are **never** written to `chrome.storage.sync`, so
+  they aren't mirrored to your Google account. Everything else (URLs, modes,
+  service toggles) syncs normally.
+- **Export Settings** omits credentials by default (you re-enter them after
+  importing), and confirms this before downloading so it's never silent. Tick
+  **Include secrets** next to the Export button to bundle tokens/passwords in
+  plaintext instead — that path requires a separate confirmation and names the
+  file `onair-settings-with-secrets.json` so a credential-bearing export is
+  obvious on disk.
+- A non-LAN endpoint carrying a token over plain `http://` shows a warning badge;
+  use `https://` for anything off the local network.
+
+---
+
 ## Testing
 
-Open the extension **Settings** page and use:
+End-to-end against real targets, from the **Settings** page:
 
-- **Test ALL ON**
-- **Test ALL OFF**
+- **Test ALL ON** / **Test ALL OFF**
 - Per-target **Test ON / Test OFF** buttons
 
-These will send requests to every enabled target.
+The Test buttons evaluate success with the exact same rule the live background
+dispatch uses (status codes + optional body match), so a hook that tests OK
+behaves identically in production.
+
+Unit tests for the shared logic run with Node's built-in runner (no deps):
+
+```bash
+npm test
+```
 
 ---
 

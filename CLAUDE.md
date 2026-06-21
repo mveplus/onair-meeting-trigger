@@ -12,13 +12,51 @@ beyond). Pairs with the `onair-led-sign-firmware` project.
 extension/         The MV3 extension (this is what ships)
   manifest.json    MV3 manifest — `version` here is the source of truth for releases
   background.js    Service worker: tab detection + trigger dispatch
+  shared.js        Pure helpers shared by background.js + options.js (no browser
+                   globals at import time — the only file the test suite imports)
   popup.{html,js}  Toolbar popup UI
-  options.{html,js} Settings page (endpoints, sign config)
+  options.{html,js} Settings page (endpoints, sign config). options.html loads
+                   options.js as `type="module"` so it can import shared.js.
   icons/
-scripts/           Release tooling (build-zip.sh, release.sh)
+tests/             Node built-in test runner specs for shared.js (`npm test`)
+package.json       `type:module`; `npm test` → `node --test`
+scripts/           Release tooling (build-zip.sh, release.sh, gen-build-info.sh)
 .github/workflows/release.yml   Tag-triggered release + Chrome Web Store upload
 VERSION            Mirror of manifest version, bumped by release.sh
 docs/, resources/  Documentation and store assets
+```
+
+## Architecture notes
+
+- **`shared.js` is the single source of truth for pure logic** (templating,
+  service matching, mode/timeout clamping, listener-URL building, HTTP-hook
+  success evaluation, secret splitting, security warnings). `background.js` and
+  `options.js` must call into it rather than re-implementing — that's what keeps
+  the live dispatch and the options "Test" buttons in agreement, and what the
+  tests exercise. Keep `shared.js` free of `chrome.*`, `window`, `document`, and
+  `fetch` at import time.
+- **Credentials never sync.** Tokens (`localToken`, `cloudToken`,
+  `basicAuth.pass`, `Authorization`/`X-API-Token` headers) live in
+  `chrome.storage.local` via `extractSecrets`/`applySecrets`; only the sanitized
+  config goes to `chrome.storage.sync`. Exports run through `redactSecrets`.
+- **Privacy:** the meeting URL is gated by `includeMeetingUrl` (default off) via
+  `meetingUrlForVars` — off sends the **origin only** (no meeting ID), on sends
+  the full URL.
+- **MV3 reliability:** a 1-minute `chrome.alarms` reconcile heartbeat
+  (`alarms` permission) re-derives state so a suspended worker can't leave the
+  sign stale; the 400 ms `setTimeout` debounce is kept for sub-second coalescing.
+- **Dev build badge:** `scripts/gen-build-info.sh` writes the gitignored
+  `extension/build-info.json` (commit/branch/dirty); `build-zip.sh` runs it
+  before zipping. The popup and options page fetch it and render
+  `formatBuildBadge` — a `vX-dev · branch @ commit` label that shows **only** for
+  unpacked builds off a non-`main` branch (detached HEAD / release / store
+  installs render nothing). Run `scripts/gen-build-info.sh` after switching
+  branches to refresh it.
+
+## Tests
+
+```bash
+npm test          # runs tests/*.test.js via Node's built-in runner (no deps)
 ```
 
 ## Release process

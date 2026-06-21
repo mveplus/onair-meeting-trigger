@@ -1,3 +1,27 @@
+import {
+  RETRY_MAX,
+  DEFAULT_STATUS_CODES,
+  trimSlash,
+  applyTemplate,
+  backoffMs,
+  normalizePrefixes,
+  normalizeCustomServices,
+  normalizeStatusCodes,
+  clampMode,
+  clampLocalTimeoutMs,
+  clampTimeoutSec,
+  buildListenerUrl,
+  httpHookSuccess,
+  endpointSecurityWarnings,
+  extractSecrets,
+  applySecrets,
+  resolveExportSecrets,
+  exportFileName,
+  formatBuildBadge,
+  BLANK_CHOICES,
+  resolveAddChoice
+} from "./shared.js";
+
 const DEFAULTS = {
   services: { meet: true, teams: true, zoom: true },
   triggerMode: "ANY_TAB",
@@ -5,14 +29,13 @@ const DEFAULTS = {
   targets: [],
   customServices: [],
   theme: "light",
-  iconMode: "alwaysColor"
+  iconMode: "alwaysColor",
+  // Privacy opt-in (Fix 3): off → {url} is the site origin only (no
+  // meeting ID); on → the full meeting URL.
+  includeMeetingUrl: false
 };
 
-const DEFAULT_STATUS_CODES = [200, 202, 204];
 const KNOWN_STATUS_CODES = [200, 202, 204, 401, 403];
-const RETRY_MAX = 2;
-const RETRY_BASE_MS = 250;
-const RETRY_MAX_MS = 2000;
 const TEMPLATES = {
   tasmota: {
     label: "Tasmota (GET)",
@@ -115,53 +138,34 @@ const TEMPLATES = {
     }
   },
   aws_iot_lambda: {
-    // Cloud bridge for the OnAir LED sign over AWS IoT.
-    // The companion Lambda is in onair-led-sign-firmware →
-    // scripts/cloud-bridge/. It validates a bearer token, reads
-    // `thing` and `mode` from the query string (so this template
-    // doesn't need any body templating), and publishes
-    // {"mode": N} on the device's onair/<thing>/cmd topic.
-    // Replace API_ID, YOUR_THING, and REPLACE_WITH_TOKEN below.
+    // Cloud bridge for the OnAir LED sign over AWS IoT. Talks to the
+    // companion Lambda (onair-led-sign-firmware → scripts/cloud-bridge/),
+    // which validates a bearer token, reads `thing` and `mode` from the
+    // query string, and publishes {"mode": N} on onair/<thing>/cmd.
+    //
+    // Modelled as a cloud-only iotHybrid (no local URL) so the single
+    // "ON mode" dropdown lets the user pick the meeting-active action —
+    // 1 (solid on) or 2 (breathing) — instead of shipping two near
+    // identical templates. OFF is mode 0, so the meeting-ended flow
+    // returns the sign to dark either way.
+    //
+    // The string fields are intentionally empty: the inputs in
+    // renderTargets carry grey `placeholder` hints, so adding this
+    // template gives empty fields plus example text rather than
+    // REPLACE_WITH_* literals that would otherwise leak into an Export
+    // Settings file. The mode/timeout defaults stay populated because
+    // those ARE the real defaults, not placeholders.
     label: "OnAir Cloud Bridge (AWS IoT Lambda)",
     target: {
-      type: "httpHook",
-      onUrl:  "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=1",
-      offUrl: "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=0",
-      method: "POST",
-      headers: [
-        { key: "Authorization", value: "Bearer REPLACE_WITH_TOKEN" }
-      ],
-      body: "",
-      basicAuth: null,
-      checkStatus: true,
-      statusCodes: [...DEFAULT_STATUS_CODES],
-      // Lambda returns json.dumps with default (no-space) separators,
-      // so match on the exact substring it emits per state.
-      matchOn:  "\"mode\":1",
-      matchOff: "\"mode\":0"
-    }
-  },
-  aws_iot_lambda_breathing: {
-    // Same cloud bridge as aws_iot_lambda above, but the "ON" action
-    // triggers breathing mode (mode=2) instead of solid on (mode=1).
-    // Pick this template if you'd rather the sign pulse during
-    // meetings than stay solid — the OFF action is still mode=0,
-    // so the meeting-ended flow returns the sign to dark either way.
-    label: "OnAir Cloud Bridge — Breathing (AWS IoT Lambda)",
-    target: {
-      type: "httpHook",
-      onUrl:  "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=2",
-      offUrl: "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=0",
-      method: "POST",
-      headers: [
-        { key: "Authorization", value: "Bearer REPLACE_WITH_TOKEN" }
-      ],
-      body: "",
-      basicAuth: null,
-      checkStatus: true,
-      statusCodes: [...DEFAULT_STATUS_CODES],
-      matchOn:  "\"mode\":2",
-      matchOff: "\"mode\":0"
+      type: "iotHybrid",
+      localBase: "",
+      localToken: "",
+      cloudBase: "",
+      cloudToken: "",
+      thing: "",
+      modeOn: 1,
+      modeOff: 0,
+      localTimeoutMs: 1500
     }
   },
   aws_iot_hybrid: {
@@ -204,7 +208,6 @@ function esc(s){
     .replaceAll("\"","&quot;")
     .replaceAll("'","&#39;");
 }
-function trimSlash(s){ return (s || "").replace(/\/+$/, ""); }
 function newId(prefix="t"){ return `${prefix}_${Math.random().toString(16).slice(2,10)}`; }
 
 function showStatus(msg, ok=true) {
@@ -219,7 +222,7 @@ function migrateIfNeeded(config) {
   if (config?.targets && Array.isArray(config.targets)) {
     const cfg = { ...DEFAULTS, ...config };
     cfg.services = { ...DEFAULTS.services, ...(config?.services || {}) };
-    cfg.customServices = normalizeCustomServices(config?.customServices);
+    cfg.customServices = normalizeCustomServices(config?.customServices, newId);
     return cfg;
   }
 
@@ -285,41 +288,11 @@ function getOriginsFromTargets(cfg) {
   return urls;
 }
 
-function normalizePrefixes(prefixes) {
-  if (!Array.isArray(prefixes)) return [];
-  return prefixes.map(p => String(p || "").trim()).filter(Boolean);
-}
-
-function normalizeCustomServices(customServices) {
-  if (!Array.isArray(customServices)) return [];
-  return customServices
-    .map(s => {
-      const name = String(s?.name || "").trim();
-      const prefixes = normalizePrefixes(s?.prefixes || []);
-      if (!name || prefixes.length === 0) return null;
-      return {
-        id: s?.id || newId("svc"),
-        name,
-        enabled: s?.enabled !== false,
-        prefixes
-      };
-    })
-    .filter(Boolean);
-}
-
 function normalizeHeadersList(headers) {
   if (!Array.isArray(headers)) return [];
   return headers
     .map(h => (h && typeof h.key === "string") ? { key: h.key.trim(), value: String(h.value ?? "") } : null)
     .filter(h => h && h.key);
-}
-
-function normalizeStatusCodes(codes) {
-  if (!Array.isArray(codes)) return [...DEFAULT_STATUS_CODES];
-  const out = codes
-    .map(c => parseInt(c, 10))
-    .filter(n => Number.isFinite(n) && n >= 100 && n <= 599);
-  return out.length ? out : [...DEFAULT_STATUS_CODES];
 }
 
 function normalizeTarget(raw) {
@@ -356,9 +329,9 @@ function normalizeTarget(raw) {
       cloudBase,
       cloudToken: String(raw?.cloudToken || ""),
       thing: String(raw?.thing || ""),
-      modeOn: Number.isFinite(+raw?.modeOn) ? +raw.modeOn : 1,
-      modeOff: Number.isFinite(+raw?.modeOff) ? +raw.modeOff : 0,
-      localTimeoutMs: Math.max(100, Math.min(10000, Number(raw?.localTimeoutMs) || 1500))
+      modeOn: clampMode(raw?.modeOn, 1),
+      modeOff: clampMode(raw?.modeOff, 0),
+      localTimeoutMs: clampLocalTimeoutMs(raw?.localTimeoutMs, 1500)
     };
   }
   if (type === "httpHook") {
@@ -470,7 +443,9 @@ function renderTargets(cfg) {
   (cfg.targets || []).forEach((t, idx) => {
     const typeLabel = t.type === "listener" ? "Listener"
       : t.type === "simpleLed" ? "Simple LED"
-      : t.type === "iotHybrid" ? "IoT (local + cloud)"
+      // A cloud-only iotHybrid (no local URL) is just the AWS bridge; only
+      // call it "local + cloud" once a LAN path is actually configured.
+      : t.type === "iotHybrid" ? (t.localBase ? "IoT (local + cloud)" : "Cloud Bridge (AWS IoT Lambda)")
       : "HTTP";
 
     const div = document.createElement("div");
@@ -530,25 +505,18 @@ function renderTargets(cfg) {
       const modeOpts = [[0, "off"], [1, "on"], [2, "breathing"]];
       const modeOn = Number(t.modeOn ?? 1);
       const modeOff = Number(t.modeOff ?? 0);
+      // The cloud (AWS IoT Lambda) bridge is the primary, always-visible
+      // path. The optional LAN-first path lives in a <details> that opens
+      // automatically once a local base URL is set, so a cloud-only row
+      // stays uncluttered without hiding the inputs for good.
+      const hasLocal = !!(t.localBase || t.localToken);
       body.innerHTML = `
-        <div class="row">
-          <div>
-            <label>Local base URL
-              <input type="text" class="t_localBase" placeholder="http://10.37.22.98" value="${esc(t.localBase || "")}">
-            </label>
-            <label>Local API token (<code>X-API-Token</code>)
-              <input type="password" class="t_localToken" placeholder="device API token" value="${esc(t.localToken || "")}" autocomplete="off" spellcheck="false">
-            </label>
-          </div>
-          <div>
-            <label>Cloud endpoint URL
-              <input type="text" class="t_cloudBase" placeholder="https://API_ID.execute-api.eu-west-1.amazonaws.com" value="${esc(t.cloudBase || "")}">
-            </label>
-            <label>Cloud bearer token (<code>Authorization</code>)
-              <input type="password" class="t_cloudToken" placeholder="bearer token" value="${esc(t.cloudToken || "")}" autocomplete="off" spellcheck="false">
-            </label>
-          </div>
-        </div>
+        <label>Cloud endpoint URL
+          <input type="text" class="t_cloudBase" placeholder="https://API_ID.execute-api.eu-west-1.amazonaws.com" value="${esc(t.cloudBase || "")}">
+        </label>
+        <label>Cloud bearer token (<code>Authorization</code>)
+          <input type="password" class="t_cloudToken" placeholder="bearer token" value="${esc(t.cloudToken || "")}" autocomplete="off" spellcheck="false">
+        </label>
         <label>AWS IoT thing
           <input type="text" class="t_thing" placeholder="onair-test-1" value="${esc(t.thing || "")}">
         </label>
@@ -568,10 +536,20 @@ function renderTargets(cfg) {
             </label>
           </div>
         </div>
-        <label>Local timeout before cloud fallback (ms)
-          <input type="number" class="t_localTimeoutMs" min="100" max="10000" value="${Number(t.localTimeoutMs ?? 1500)}">
-        </label>
-        <div class="muted">On every event, the extension fires <em>one</em> request to the local API (no retries, single fetch inside the timeout above). If it doesn't return 2xx in time, the cloud endpoint takes over. Exactly one of the two paths actually flips the sign per event — no duplicate commands.</div>
+        <details class="advanced" ${hasLocal ? "open" : ""}>
+          <summary>Local-first LAN path (optional)</summary>
+          <div class="muted" style="margin-bottom:8px;">Fill this in to try the device on your LAN first and only fall back to the cloud bridge above when it's unreachable. Leave blank for a cloud-only setup.</div>
+          <label>Local base URL
+            <input type="text" class="t_localBase" placeholder="http://10.37.22.98" value="${esc(t.localBase || "")}">
+          </label>
+          <label>Local API token (<code>X-API-Token</code>)
+            <input type="password" class="t_localToken" placeholder="device API token" value="${esc(t.localToken || "")}" autocomplete="off" spellcheck="false">
+          </label>
+          <label>Local timeout before cloud fallback (ms)
+            <input type="number" class="t_localTimeoutMs" min="100" max="10000" value="${Number(t.localTimeoutMs ?? 1500)}">
+          </label>
+        </details>
+        <div class="muted">On every event the extension fires <em>one</em> request${hasLocal ? " to the local API (single fetch, no retries, capped by the timeout above); if it doesn't return 2xx in time the cloud endpoint takes over" : " to the cloud endpoint"}. Exactly one path flips the sign per event — no duplicate commands.</div>
       `;
     } else {
       // httpHook
@@ -662,6 +640,10 @@ function validateTargetNode(node, t) {
     const offUrl = node.querySelector(".t_offUrl")?.value.trim() || "";
     if (!onUrl && !offUrl) warnings.push("Add ON and/or OFF URL");
   }
+  // Fix 2: flag credentials about to travel over cleartext to a non-LAN
+  // host. Built from the live field values so the warning appears as you
+  // type, before Save.
+  warnings.push(...endpointSecurityWarnings(buildTargetFromNode(node, t)));
   return warnings;
 }
 
@@ -680,10 +662,9 @@ function buildTargetFromNode(node, t) {
     base.cloudBase = trimSlash(node.querySelector(".t_cloudBase")?.value.trim() || "");
     base.cloudToken = node.querySelector(".t_cloudToken")?.value.trim() || "";
     base.thing = node.querySelector(".t_thing")?.value.trim() || "";
-    base.modeOn = parseInt(node.querySelector(".t_modeOn")?.value || "1", 10);
-    base.modeOff = parseInt(node.querySelector(".t_modeOff")?.value || "0", 10);
-    base.localTimeoutMs = Math.max(100, Math.min(10000,
-      parseInt(node.querySelector(".t_localTimeoutMs")?.value || "1500", 10)));
+    base.modeOn = clampMode(node.querySelector(".t_modeOn")?.value, 1);
+    base.modeOff = clampMode(node.querySelector(".t_modeOff")?.value, 0);
+    base.localTimeoutMs = clampLocalTimeoutMs(node.querySelector(".t_localTimeoutMs")?.value, 1500);
   } else {
     base.onUrl = node.querySelector(".t_onUrl")?.value.trim() || "";
     base.offUrl = node.querySelector(".t_offUrl")?.value.trim() || "";
@@ -771,8 +752,13 @@ function readTargetsFromUI(cfg) {
 }
 
 async function load() {
-  const { config } = await chrome.storage.sync.get({ config: DEFAULTS });
-  const cfg = migrateIfNeeded(config);
+  const [{ config }, { secrets }] = await Promise.all([
+    chrome.storage.sync.get({ config: DEFAULTS }),
+    chrome.storage.local.get({ secrets: {} })
+  ]);
+  // Fix 1: credentials are stored in storage.local (never synced to the
+  // Google account); merge them back onto the synced, sanitized config.
+  const cfg = applySecrets(migrateIfNeeded(config), secrets);
 
   $("svc_meet").checked = !!cfg.services.meet;
   $("svc_teams").checked = !!cfg.services.teams;
@@ -785,10 +771,11 @@ async function load() {
   updateIconPreview();
   $("theme_switch").checked = (cfg.theme || "light") === "dark";
   applyTheme(cfg.theme || "light");
+  $("include_meeting_url").checked = !!cfg.includeMeetingUrl;
   updateTimeoutPills();
 
   // Store current cfg on window for edits
-  cfg.customServices = normalizeCustomServices(cfg.customServices);
+  cfg.customServices = normalizeCustomServices(cfg.customServices, newId);
   window.__cfg = cfg;
   renderCustomServices(cfg);
   renderTargets(cfg);
@@ -864,11 +851,12 @@ async function save() {
       zoom: $("svc_zoom").checked
     },
     triggerMode: $("mode_select").value || "ANY_TAB",
-    timeoutSec: Math.max(1, Math.min(20, parseInt($("http_timeout").value || "3", 10))),
+    timeoutSec: clampTimeoutSec($("http_timeout").value, 3),
     targets: cfg.targets || [],
     customServices: cfg.customServices || [],
     theme: $("theme_switch").checked ? "dark" : "light",
-    iconMode: $("icon_mode").value || DEFAULTS.iconMode
+    iconMode: $("icon_mode").value || DEFAULTS.iconMode,
+    includeMeetingUrl: $("include_meeting_url").checked
   };
 
   cfg = readCustomServicesFromUI(cfg);
@@ -880,7 +868,14 @@ async function save() {
     if (!ok) return showStatus(`Permission denied for ${url}`, false);
   }
 
-  await chrome.storage.sync.set({ config: cfg });
+  // Fix 1: split credentials out of the synced blob. The sanitized
+  // config goes to storage.sync (mirrored to the user's Google account);
+  // the secrets map goes to storage.local only.
+  const { config: sanitized, secrets } = extractSecrets(cfg);
+  await Promise.all([
+    chrome.storage.sync.set({ config: sanitized }),
+    chrome.storage.local.set({ secrets })
+  ]);
   window.__cfg = cfg;
   showStatus("Saved");
   chrome.runtime.sendMessage({ type: "CONFIG_UPDATED" });
@@ -896,10 +891,35 @@ function exportHooks() {
     zoom: $("svc_zoom").checked
   };
   const triggerMode = $("mode_select").value || "ANY_TAB";
-  const timeoutSec = Math.max(1, Math.min(20, parseInt($("http_timeout").value || "3", 10)));
+  const timeoutSec = clampTimeoutSec($("http_timeout").value, 3);
   const iconMode = $("icon_mode").value || DEFAULTS.iconMode;
 
-  const targets = (cfg.targets || []).map(t => {
+  // Fix 1 + user choice: credentials are excluded by default. The user
+  // can opt in via the "Include secrets" checkbox; the pure decision
+  // (what gets included) lives in resolveExportSecrets so it's testable.
+  const wantSecrets = $("export_secrets")?.checked === true;
+  const { hasSecrets: secretsPresent, includesSecrets: includeSecrets, targets: sourceTargets } =
+    resolveExportSecrets(cfg.targets || [], wantSecrets);
+
+  // Either way, never let the consequence be silent.
+  if (secretsPresent) {
+    const ok = includeSecrets
+      ? confirm(
+          "⚠️ Include secrets is ON.\n\n" +
+          "The exported file will contain your tokens / passwords in PLAINTEXT. " +
+          "Anyone who gets the file can read them — keep it private (don't email it, " +
+          "commit it, or sync it to a shared drive).\n\nExport WITH secrets?"
+        )
+      : confirm(
+          "Your saved tokens / passwords will NOT be included in this file " +
+          "(this is the safe default). You'll re-enter them after importing.\n\n" +
+          "Tip: tick \"Include secrets\" next to Export to bundle them instead.\n\n" +
+          "Export without secrets?"
+        );
+    if (!ok) return showStatus("Export cancelled", false);
+  }
+
+  const targets = sourceTargets.map(t => {
     if (t.type === "listener") {
       return { type: "listener", url: t.url || "", enabled: t.enabled !== false };
     }
@@ -919,9 +939,9 @@ function exportHooks() {
         cloudBase: t.cloudBase || "",
         cloudToken: t.cloudToken || "",
         thing: t.thing || "",
-        modeOn: Number.isFinite(+t.modeOn) ? +t.modeOn : 1,
-        modeOff: Number.isFinite(+t.modeOff) ? +t.modeOff : 0,
-        localTimeoutMs: Math.max(100, Math.min(10000, Number(t.localTimeoutMs) || 1500)),
+        modeOn: clampMode(t.modeOn, 1),
+        modeOff: clampMode(t.modeOff, 0),
+        localTimeoutMs: clampLocalTimeoutMs(t.localTimeoutMs, 1500),
         enabled: t.enabled !== false
       };
     }
@@ -950,19 +970,26 @@ function exportHooks() {
     targets,
     customServices: cfg.customServices || [],
     theme: $("theme_switch").checked ? "dark" : "light",
-    iconMode
+    iconMode,
+    includeMeetingUrl: $("include_meeting_url").checked
   };
+
+  if (includeSecrets) payload.containsSecrets = true;
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "onair-settings.json";
+  // Name the file so a secret-bearing export is obvious on disk.
+  a.download = exportFileName(includeSecrets);
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  showStatus(`Exported ${targets.length} target(s)`);
+  const note = includeSecrets ? " — ⚠️ includes secrets (keep private)"
+    : secretsPresent ? " — credentials excluded (re-enter after import)"
+    : "";
+  showStatus(`Exported ${targets.length} target(s)${note}`);
 }
 
 async function importHooksFromFile(file) {
@@ -980,17 +1007,18 @@ async function importHooksFromFile(file) {
     } else if (Array.isArray(parsed?.targets)) {
       targets = parsed.targets;
     }
-    if (parsed?.services || parsed?.triggerMode || parsed?.timeoutSec !== undefined || parsed?.theme || parsed?.iconMode) {
+    if (parsed?.services || parsed?.triggerMode || parsed?.timeoutSec !== undefined || parsed?.theme || parsed?.iconMode || parsed?.includeMeetingUrl !== undefined) {
       importedSettings = {
         services: { ...DEFAULTS.services, ...(parsed.services || {}) },
         triggerMode: parsed.triggerMode || DEFAULTS.triggerMode,
-        timeoutSec: Math.max(1, Math.min(20, parseInt(parsed.timeoutSec ?? DEFAULTS.timeoutSec, 10))),
+        timeoutSec: clampTimeoutSec(parsed.timeoutSec ?? DEFAULTS.timeoutSec, DEFAULTS.timeoutSec),
         theme: parsed.theme || DEFAULTS.theme,
-        iconMode: parsed.iconMode || DEFAULTS.iconMode
+        iconMode: parsed.iconMode || DEFAULTS.iconMode,
+        includeMeetingUrl: !!parsed.includeMeetingUrl
       };
     }
     if (Array.isArray(parsed?.customServices)) {
-      customServices = normalizeCustomServices(parsed.customServices);
+      customServices = normalizeCustomServices(parsed.customServices, newId);
     }
 
     const normalizedTargets = targets.map(normalizeTarget).filter(Boolean);
@@ -1006,6 +1034,7 @@ async function importHooksFromFile(file) {
       cfg.timeoutSec = importedSettings.timeoutSec;
       cfg.theme = importedSettings.theme;
       cfg.iconMode = importedSettings.iconMode;
+      cfg.includeMeetingUrl = importedSettings.includeMeetingUrl;
 
       $("svc_meet").checked = !!cfg.services.meet;
       $("svc_teams").checked = !!cfg.services.teams;
@@ -1019,6 +1048,7 @@ async function importHooksFromFile(file) {
       updateIconPreview();
       $("theme_switch").checked = (cfg.theme || "light") === "dark";
       applyTheme(cfg.theme || "light");
+      $("include_meeting_url").checked = !!cfg.includeMeetingUrl;
     }
     cfg.targets = [...(cfg.targets || []), ...normalizedTargets];
     if (customServices.length > 0) {
@@ -1034,18 +1064,6 @@ async function importHooksFromFile(file) {
   } catch {
     showStatus("Invalid JSON file", false);
   }
-}
-
-function applyTemplate(str, vars) {
-  return String(str ?? "")
-    .replaceAll("{state}", vars.state ?? "")
-    .replaceAll("{service}", vars.service ?? "")
-    .replaceAll("{url}", vars.url ?? "")
-    .replaceAll("{ts}", String(vars.ts ?? ""));
-}
-
-function backoffMs(attempt) {
-  return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** attempt));
 }
 
 function sleep(ms) {
@@ -1065,20 +1083,8 @@ async function testAll(state) {
 
   const jobs = (cfg.targets || []).filter(t => t.enabled).map(async (t) => {
     if (t.type === "listener") {
-      let url = t.url || "";
-      if (url.includes("{state}") || url.includes("{service}") || url.includes("{url}") || url.includes("{ts}")) {
-        url = applyTemplate(url, vars);
-      } else {
-        try {
-          const u = new URL(url);
-          u.searchParams.set("state", vars.state);
-          u.searchParams.set("service", vars.service);
-          u.searchParams.set("ts", String(vars.ts));
-          url = u.toString();
-        } catch {
-          return { ok:false, name:t.id };
-        }
-      }
+      const url = buildListenerUrl(t.url, vars);
+      if (!url) return { ok:false, name:t.id };
       return fetchWithTimeout(url, { method:"GET" }, timeoutMs).then(ok => ({ ok, name:t.id }));
     }
 
@@ -1120,20 +1126,8 @@ async function fetchWithTimeout(url, opts, timeoutMs, checkStatus = true) {
 async function testSingleTarget(t, vars, timeoutMs) {
   if (!t || !t.enabled) return false;
   if (t.type === "listener") {
-    let url = t.url || "";
-    if (url.includes("{state}") || url.includes("{service}") || url.includes("{url}") || url.includes("{ts}")) {
-      url = applyTemplate(url, vars);
-    } else {
-      try {
-        const u = new URL(url);
-        u.searchParams.set("state", vars.state);
-        u.searchParams.set("service", vars.service);
-        u.searchParams.set("ts", String(vars.ts));
-        url = u.toString();
-      } catch {
-        return false;
-      }
-    }
+    const url = buildListenerUrl(t.url, vars);
+    if (!url) return false;
     return fetchWithTimeout(url, { method:"GET" }, timeoutMs);
   }
   if (t.type === "simpleLed") {
@@ -1186,14 +1180,9 @@ async function testHttpHookTarget(t, vars, timeoutMs, state) {
   }
 
   const body = (method === "GET" || method === "HEAD") ? undefined : (applyTemplate(t.body || "", vars) || undefined);
-  const checkStatus = t.checkStatus !== false;
-  const statusCodes = normalizeStatusCodes(t.statusCodes);
-  const match = state === "ON" ? (t.matchOn || "") : (t.matchOff || "");
+  // Fix 4: same success rule the live background dispatch uses.
   const res = await fetchWithTimeoutResult(url, { method, headers, body }, timeoutMs);
-  if (!checkStatus) return !res.error;
-  const okStatus = statusCodes.includes(res.status);
-  const okBody = match ? (res.text || "").includes(match) : true;
-  return okStatus && okBody;
+  return httpHookSuccess(t, state, res);
 }
 
 async function fetchWithTimeoutResult(url, opts, timeoutMs) {
@@ -1218,34 +1207,47 @@ $("save").addEventListener("click", save);
 $("test_on").addEventListener("click", () => testAll("ON"));
 $("test_off").addEventListener("click", () => testAll("OFF"));
 
-$("add_listener").addEventListener("click", () => addTarget("listener"));
-$("add_hook").addEventListener("click", () => addTarget("httpHook"));
 $("add_custom_service").addEventListener("click", addCustomService);
 $("add_template").addEventListener("click", () => {
-  const key = $("target_template").value;
-  if (!key) return showStatus("Pick a template first", false);
-  if (!TEMPLATES[key]) return showStatus(`Unknown template '${key}'`, false);
+  // The dropdown now covers both blank targets (formerly the "Add HTTP
+  // Hook" / "Add local Listener" buttons) and pre-filled templates; the
+  // pure resolveAddChoice tells us which action the selection maps to.
+  const choice = resolveAddChoice($("target_template").value, TEMPLATES);
+  if (choice.kind === "none") return showStatus("Pick something to add first", false);
+  if (choice.kind === "unknown") return showStatus("Unknown selection", false);
   // Templates may carry a `target.type` other than httpHook (e.g.
-  // iotHybrid). Route through addTarget with the template's own type so
-  // the right add-branch picks up its fields.
-  const tplType = TEMPLATES[key].target?.type || "httpHook";
-  addTarget(tplType, key);
+  // iotHybrid). Either way addTarget(type, templateKey?) picks the right
+  // branch; a blank choice has no templateKey.
+  addTarget(choice.type, choice.templateKey || "");
 });
 
-// Build the template <select> from the TEMPLATES object so that adding
-// a new entry is a single-file change in options.js. Placeholder
-// <option> stays in the static markup; everything below it is
-// regenerated here at load time.
+// Build the "Add a target…" <select> from BLANK_CHOICES + the TEMPLATES
+// object so adding an entry is a single-file change. Blanks go in their
+// own optgroup above the templates.
 function populateTemplateDropdown() {
   const sel = $("target_template");
   if (!sel) return;
-  sel.innerHTML = '<option value="">Template: Select one…</option>';
+  sel.innerHTML = '<option value="">Add a target…</option>';
+
+  const blanks = document.createElement("optgroup");
+  blanks.label = "Blank";
+  for (const [value, def] of Object.entries(BLANK_CHOICES)) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = def.label;
+    blanks.appendChild(opt);
+  }
+  sel.appendChild(blanks);
+
+  const tpls = document.createElement("optgroup");
+  tpls.label = "From template";
   for (const [key, def] of Object.entries(TEMPLATES)) {
     const opt = document.createElement("option");
     opt.value = key;
     opt.textContent = def.label || key;
-    sel.appendChild(opt);
+    tpls.appendChild(opt);
   }
+  sel.appendChild(tpls);
 }
 populateTemplateDropdown();
 
@@ -1259,6 +1261,24 @@ $("import_hooks_file").addEventListener("change", (e) => {
 
 function applyTheme(theme) {
   document.body.dataset.theme = theme === "dark" ? "dark" : "light";
+}
+
+// Show a "vX-dev · branch @ commit" badge for unpacked dev builds off a
+// non-main branch. build-info.json is absent in store/release installs,
+// so this no-ops there. See scripts/gen-build-info.sh + formatBuildBadge.
+async function showBuildBadge() {
+  try {
+    const res = await fetch(chrome.runtime.getURL("build-info.json"), { cache: "no-store" });
+    if (!res.ok) return;
+    const info = await res.json();
+    const label = formatBuildBadge(info, chrome.runtime.getManifest().version);
+    if (!label) return;
+    const el = $("build_badge");
+    el.textContent = label;
+    el.style.display = "inline-block";
+  } catch {
+    // no build info — render nothing
+  }
 }
 
 $("theme_switch").addEventListener("change", () => applyTheme($("theme_switch").checked ? "dark" : "light"));
@@ -1286,3 +1306,4 @@ document.querySelectorAll(".timeout-pill").forEach(btn => {
 });
 
 load();
+showBuildBadge();

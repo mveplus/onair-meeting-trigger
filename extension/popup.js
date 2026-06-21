@@ -1,5 +1,25 @@
+import { formatBuildBadge } from "./shared.js";
 
 function $(id){ return document.getElementById(id); }
+
+// Show a "vX-dev · branch @ commit" badge when running an unpacked build
+// off a non-main branch. build-info.json is written by
+// scripts/gen-build-info.sh and is absent in store/release installs, so
+// this silently no-ops there.
+async function showBuildBadge() {
+  try {
+    const res = await fetch(chrome.runtime.getURL("build-info.json"), { cache: "no-store" });
+    if (!res.ok) return;
+    const info = await res.json();
+    const label = formatBuildBadge(info, chrome.runtime.getManifest().version);
+    if (!label) return;
+    const el = $("build_badge");
+    el.textContent = label;
+    el.style.display = "block";
+  } catch {
+    // no build info (packed/store build) — render nothing
+  }
+}
 
 function applyTheme(theme) {
   document.body.dataset.theme = theme === "dark" ? "dark" : "light";
@@ -40,3 +60,4 @@ chrome.storage.onChanged.addListener((changes, area) => {
 refresh();
 updateIconHint();
 updateTheme();
+showBuildBadge();

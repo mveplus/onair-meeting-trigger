@@ -114,7 +114,7 @@
       animation: fadeIn 0.6s ease-out;
     }
     label { display:block; margin: 10px 0; color: var(--ink); }
-    input[type="text"], input[type="number"], select, textarea {
+    input[type="text"], input[type="password"], input[type="number"], select, textarea {
       width: 100%;
       max-width: 820px;
       padding: 10px 12px;
@@ -125,7 +125,7 @@
       transition: border-color 0.2s ease, box-shadow 0.2s ease;
       font-family: inherit;
     }
-    input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+    input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
       border-color: var(--accent);
       box-shadow: var(--glow);
       outline: none;
@@ -401,6 +401,8 @@
         </div>
       </div>
       <p class="subtitle">Design your meeting signals, services, and automations in one place.</p>
+      <code class="muted" id="build_badge" style="display:none; align-self:start;"
+            title="Unpacked dev build — git branch @ commit"></code>
     </div>
 
     <div class="card">
@@ -460,23 +462,33 @@
           </select>
         </label>
       </div>
+      <label class="checkItem" style="margin-top:12px; cursor:pointer;">
+        <input type="checkbox" id="include_meeting_url">
+        <span class="checkBox"></span>
+        <span>Include the full meeting URL (with meeting ID) in requests
+          <span class="muted">(off by default — when off, <code>{url}</code> is just the
+          site origin like <code>https://meet.google.com</code>, so the host is shared but
+          the meeting ID never leaves the browser; turn on to send the complete URL)</span></span>
+      </label>
     </div>
 
     <div class="card">
       <h2>Targets (LAN / local outputs)</h2>
       <div class="btns">
-        <button id="add_hook">Add HTTP Hook</button>
-        <button id="add_listener">Add local Listener</button>
         <select id="target_template" class="selectButton compact">
-          <option value="">Template: Select one…</option>
-          <!-- Entries are appended at runtime by populateTemplateDropdown()
-               in options.js, so the JS TEMPLATES object is the single
-               source of truth for the dropdown contents. -->
+          <option value="">Add a target…</option>
+          <!-- Blank-target and template options are appended at runtime by
+               populateTemplateDropdown() in options.js (BLANK_CHOICES +
+               the TEMPLATES object are the single source of truth). -->
         </select>
-        <button id="add_template">Add from Template</button>
-        <button id="export_hooks">Export Settings</button>
+        <button id="add_template">Add</button>
         <button id="import_hooks">Import Settings</button>
         <input type="file" id="import_hooks_file" accept="application/json" style="display:none" />
+        <button id="export_hooks">Export Settings</button>
+        <label class="muted" style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;"
+               title="Off (default): tokens/passwords are stripped from the exported file. On: they are written in plaintext — keep the file private.">
+          <input type="checkbox" id="export_secrets"> Include secrets
+        </label>
       </div>
 
       <div id="targets"></div>
@@ -489,7 +501,7 @@
       <span class="status" id="status"></span>
     </div>
 
-    <script src="options.js"></script>
+    <script type="module" src="options.js"></script>
   </div>
 </body>
 </html>
