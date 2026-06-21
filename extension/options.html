@@ -130,6 +130,10 @@
       box-shadow: var(--glow);
       outline: none;
     }
+    /* Native checkboxes (e.g. "Include secrets") should follow the theme
+       instead of rendering with the browser's default light chrome. */
+    input[type="checkbox"] { accent-color: var(--accent); }
+    body[data-theme="dark"] input[type="checkbox"] { color-scheme: dark; }
     textarea { min-height: 88px; font-family: "Courier New", Courier, monospace; }
     .row { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .muted { color: var(--muted); font-size: 13px; }
