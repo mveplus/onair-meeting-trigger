@@ -482,6 +482,13 @@ describe("UI: settingsSignature (dirty detection)", () => {
     assert.equal(settingsSignature(a), settingsSignature(b));
   });
 
+  test("theme is excluded (toggling it is not an unsaved change)", () => {
+    const a = cfg();
+    const b = cfg();
+    b.theme = "dark"; // a.theme is "light"
+    assert.equal(settingsSignature(a), settingsSignature(b));
+  });
+
   test("a meaningful change flips the signature", () => {
     const a = cfg();
     const b = cfg();

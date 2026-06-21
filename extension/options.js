@@ -1305,7 +1305,22 @@ async function showBuildBadge() {
   }
 }
 
-$("theme_switch").addEventListener("change", () => applyTheme($("theme_switch").checked ? "dark" : "light"));
+// Theme is a personal display preference, not document content — apply
+// and persist it instantly on toggle so it never requires a Save (and so
+// it doesn't trip the unsaved-changes bar; see settingsSignature, which
+// excludes theme).
+async function persistTheme(theme) {
+  const { config } = await chrome.storage.sync.get({ config: DEFAULTS });
+  config.theme = theme;
+  await chrome.storage.sync.set({ config });
+  if (window.__cfg) window.__cfg.theme = theme;
+}
+
+$("theme_switch").addEventListener("change", () => {
+  const theme = $("theme_switch").checked ? "dark" : "light";
+  applyTheme(theme);
+  persistTheme(theme);
+});
 
 function updateIconPreview() {
   const mode = $("icon_mode").value || DEFAULTS.iconMode;
