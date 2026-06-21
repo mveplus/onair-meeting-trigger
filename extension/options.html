@@ -114,7 +114,7 @@
       animation: fadeIn 0.6s ease-out;
     }
     label { display:block; margin: 10px 0; color: var(--ink); }
-    input[type="text"], input[type="number"], select, textarea {
+    input[type="text"], input[type="password"], input[type="number"], select, textarea {
       width: 100%;
       max-width: 820px;
       padding: 10px 12px;
@@ -125,7 +125,7 @@
       transition: border-color 0.2s ease, box-shadow 0.2s ease;
       font-family: inherit;
     }
-    input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+    input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
       border-color: var(--accent);
       box-shadow: var(--glow);
       outline: none;
@@ -460,6 +460,14 @@
           </select>
         </label>
       </div>
+      <label class="checkItem" style="margin-top:12px; cursor:pointer;">
+        <input type="checkbox" id="include_meeting_url">
+        <span class="checkBox"></span>
+        <span>Include the meeting tab URL in requests
+          <span class="muted">(off by default — the <code>{url}</code> token and the
+          auto-appended <code>url=</code> param stay empty unless enabled, so meeting
+          IDs never leave the browser)</span></span>
+      </label>
     </div>
 
     <div class="card">
@@ -489,7 +497,7 @@
       <span class="status" id="status"></span>
     </div>
 
-    <script src="options.js"></script>
+    <script type="module" src="options.js"></script>
   </div>
 </body>
 </html>

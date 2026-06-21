@@ -143,7 +143,8 @@ In Listener and HTTP Hook targets, you can use:
 
 - `{state}` → `ON` or `OFF`
 - `{service}` → `meet`, `teams`, `zoom` (or `test` during Test buttons)
-- `{url}` → the meeting tab URL (when available)
+- `{url}` → the meeting tab URL — empty unless **Include the meeting tab URL in
+  requests** is enabled in Settings (off by default, so meeting IDs are not sent)
 - `{ts}` → timestamp (unix ms)
 
 ---
@@ -177,7 +178,11 @@ When a tab URL starts with any of those prefixes, the extension will report
 
 ## Permissions
 
-The extension requests host permissions **only for the targets you configure**, for example:
+Declared permissions: `storage`, `tabs`, `alarms` (the alarm drives a
+once-a-minute reconcile so a suspended service worker can't leave the sign
+stuck out of sync).
+
+Host permissions are requested **only for the targets you configure**, for example:
 - `http://127.0.0.1/*`
 - `http://192.168.1.17/*`
 
@@ -185,15 +190,35 @@ You’ll be prompted to allow these when you save settings.
 
 ---
 
+## Credential storage & privacy
+
+- Tokens and passwords (`localToken`, `cloudToken`, HTTP Basic password, and
+  `Authorization` / `X-API-Token` header values) are kept in
+  `chrome.storage.local` and are **never** written to `chrome.storage.sync`, so
+  they aren't mirrored to your Google account. Everything else (URLs, modes,
+  service toggles) syncs normally.
+- **Export Settings** omits credentials — you re-enter them after importing.
+- A non-LAN endpoint carrying a token over plain `http://` shows a warning badge;
+  use `https://` for anything off the local network.
+
+---
+
 ## Testing
 
-Open the extension **Settings** page and use:
+End-to-end against real targets, from the **Settings** page:
 
-- **Test ALL ON**
-- **Test ALL OFF**
+- **Test ALL ON** / **Test ALL OFF**
 - Per-target **Test ON / Test OFF** buttons
 
-These will send requests to every enabled target.
+The Test buttons evaluate success with the exact same rule the live background
+dispatch uses (status codes + optional body match), so a hook that tests OK
+behaves identically in production.
+
+Unit tests for the shared logic run with Node's built-in runner (no deps):
+
+```bash
+npm test
+```
 
 ---
 

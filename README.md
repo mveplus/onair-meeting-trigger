@@ -22,10 +22,10 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 - HTTP hooks (Home Assistant, Tasmota, Shelly, ESP)
 - **IoT (local + cloud)** target type — tries the device's local HTTP API first and transparently falls back to **your own** AWS IoT MQTT publish (via your own API Gateway + Lambda) when off-LAN. Bring-your-own-cloud, no third-party in the loop.
 - Redesigned settings UI
-- Built-in templates for common targets, including OnAir Cloud Bridge (AWS IoT Lambda) — solid, breathing, and local-first-hybrid variants
-- Import/export settings (includes trigger mode, timeout, toolbar icon mode)
+- Built-in templates for common targets, including OnAir Cloud Bridge (AWS IoT Lambda) — pick solid or breathing from the ON-mode dropdown — plus a local-first-hybrid variant
+- Import/export settings (includes trigger mode, timeout, toolbar icon mode) — credentials are excluded from exports
 - Flatpak / Snap compatible
-- Privacy-first (no telemetry)
+- Privacy-first (no telemetry; tokens are stored in `chrome.storage.local` and never synced to your Google account; the meeting tab URL is only sent to targets when you opt in)
 
 ![ON-AIR Meeting Trigger Settings](resources/Screenshot_OnAir_dark_theme.png)
 

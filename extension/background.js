@@ -3,6 +3,24 @@
 // Adds "targets" so you can drive any IoT device via HTTP hooks (e.g., Tasmota),
 // while keeping legacy listenerUrl + direct LED support.
 
+import {
+  RETRY_MAX,
+  trimSlash,
+  applyTemplate,
+  backoffMs,
+  normalizeHeaders,
+  normalizeCustomServices,
+  matchService,
+  clampMode,
+  clampLocalTimeoutMs,
+  clampTimeoutSec,
+  buildListenerUrl,
+  meetingUrlForVars,
+  httpHookSuccess,
+  applySecrets,
+  extractSecrets
+} from "./shared.js";
+
 const LEGACY_DEFAULTS = {
   services: { meet: true, teams: true, zoom: true },
   triggerMode: "ANY_TAB", // or ACTIVE_TAB
@@ -16,6 +34,9 @@ const DEFAULTS = {
   triggerMode: "ANY_TAB",
   timeoutSec: 3,
   iconMode: "alwaysColor",
+  // Privacy opt-in (Fix 3): when false, the meeting tab URL is never
+  // sent to targets ({url} resolves to "" and is not auto-appended).
+  includeMeetingUrl: false,
   targets: [
     // Examples:
     // { id:"listener1", type:"listener", enabled:false, url:"http://127.0.0.1:8765/event?state={state}&service={service}&url={url}&ts={ts}" },
@@ -23,12 +44,6 @@ const DEFAULTS = {
     // { id:"led1", type:"simpleLed", enabled:false, baseUrl:"http://192.168.1.50", verifyStatus:false }
   ],
   customServices: []
-};
-
-const URL_PREFIXES = {
-  meet: ["https://meet.google.com/"],
-  teams: ["https://teams.microsoft.com/"],
-  zoom: ["https://zoom.us/", "https://app.zoom.us/"]
 };
 
 const ICONS_COLOR = {
@@ -44,9 +59,15 @@ const ICONS_GRAY = {
   128: "icons/icon128_gray.png"
 };
 
-const RETRY_MAX = 2;
-const RETRY_BASE_MS = 250;
-const RETRY_MAX_MS = 2000;
+// MV3 reconcile heartbeat (Fix 5): the 400ms debounce below uses
+// setTimeout, which is fine for sub-second coalescing while the worker
+// is awake, but events can be missed while Chrome has the service
+// worker suspended. This periodic alarm wakes the worker and re-derives
+// state from scratch so the sign can't get stuck out of sync.
+const RECONCILE_ALARM = "onair-reconcile";
+const RECONCILE_PERIOD_MIN = 1;
+
+const DEBOUNCE_MS = 400;
 
 let current = { state: "OFF", service: null, url: null, ts: Date.now() };
 let debounceTimer = null;
@@ -66,38 +87,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
   debugEnabled = !!changes.debugLogs.newValue;
 });
 
-function trimSlash(s) {
-  return (s || "").replace(/\/+$/, "");
-}
-
-function newId(prefix="t") {
+function newId(prefix = "t") {
   return `${prefix}_${Math.random().toString(16).slice(2, 10)}`;
-}
-
-function normalizeHeaders(headers) {
-  if (!Array.isArray(headers)) return [];
-  return headers
-    .filter(h => h && typeof h.key === "string" && h.key.trim() !== "")
-    .map(h => ({ key: h.key.trim(), value: String(h.value ?? "") }));
-}
-
-function normalizeCustomServices(customServices) {
-  if (!Array.isArray(customServices)) return [];
-  return customServices
-    .map(s => {
-      const name = String(s?.name || "").trim();
-      const prefixes = Array.isArray(s?.prefixes)
-        ? s.prefixes.map(p => String(p || "").trim()).filter(Boolean)
-        : [];
-      if (!name || prefixes.length === 0) return null;
-      return {
-        id: s?.id || newId("svc"),
-        name,
-        enabled: s?.enabled !== false,
-        prefixes
-      };
-    })
-    .filter(Boolean);
 }
 
 // Legacy -> targets migration (best-effort)
@@ -106,9 +97,10 @@ function migrateConfig(config) {
   if (config?.targets && Array.isArray(config.targets)) {
     const cfg = { ...DEFAULTS, ...config };
     cfg.services = { ...DEFAULTS.services, ...(config?.services || {}) };
-    cfg.timeoutSec = Math.max(1, Math.min(20, parseInt(cfg.timeoutSec ?? 3, 10)));
+    cfg.timeoutSec = clampTimeoutSec(cfg.timeoutSec, 3);
     cfg.iconMode = config.iconMode || DEFAULTS.iconMode;
-    cfg.customServices = normalizeCustomServices(config?.customServices);
+    cfg.includeMeetingUrl = !!config.includeMeetingUrl;
+    cfg.customServices = normalizeCustomServices(config?.customServices, newId);
 
     cfg.targets = cfg.targets.map(t => {
       const tt = { ...t };
@@ -137,9 +129,11 @@ function migrateConfig(config) {
         tt.cloudBase = trimSlash(tt.cloudBase || "");
         tt.cloudToken = String(tt.cloudToken || "");
         tt.thing = String(tt.thing || "");
-        tt.modeOn = Number.isFinite(+tt.modeOn) ? +tt.modeOn : 1;
-        tt.modeOff = Number.isFinite(+tt.modeOff) ? +tt.modeOff : 0;
-        tt.localTimeoutMs = Math.max(100, Math.min(10000, Number(tt.localTimeoutMs) || 1500));
+        // Fix 6: clamp modes to {0,1,2} so a tampered import can't push
+        // an arbitrary mode= into the cloud URL.
+        tt.modeOn = clampMode(tt.modeOn, 1);
+        tt.modeOff = clampMode(tt.modeOff, 0);
+        tt.localTimeoutMs = clampLocalTimeoutMs(tt.localTimeoutMs, 1500);
       }
       return tt;
     });
@@ -155,14 +149,11 @@ function migrateConfig(config) {
   const targets = [];
 
   if (legacy.listenerUrl && legacy.listenerUrl.trim()) {
-    // Convert to templated URL (match your old behavior but more explicit)
-    const base = legacy.listenerUrl.trim();
-    // If user already put query params, keep them; append in execution if it has no {state} token.
     targets.push({
       id: newId("listener"),
       type: "listener",
       enabled: true,
-      url: base
+      url: legacy.listenerUrl.trim()
     });
   }
 
@@ -179,43 +170,35 @@ function migrateConfig(config) {
   return {
     services: legacy.services,
     triggerMode: legacy.triggerMode || "ANY_TAB",
-    timeoutSec: Math.max(1, Math.min(20, parseInt(legacy.direct?.timeoutSec ?? 3, 10))),
+    timeoutSec: clampTimeoutSec(legacy.direct?.timeoutSec, 3),
     targets,
     customServices: [],
-    iconMode: DEFAULTS.iconMode
+    iconMode: DEFAULTS.iconMode,
+    includeMeetingUrl: false
   };
 }
 
 async function getConfig() {
-  const { config } = await chrome.storage.sync.get({ config: DEFAULTS });
-  const cfg = migrateConfig(config);
+  const [{ config }, { secrets }] = await Promise.all([
+    chrome.storage.sync.get({ config: DEFAULTS }),
+    chrome.storage.local.get({ secrets: {} })
+  ]);
+  let cfg = migrateConfig(config);
+  // Fix 1: credentials live in storage.local (not synced to the Google
+  // account). Merge them back onto the synced, sanitized config.
+  cfg = applySecrets(cfg, secrets);
 
-  // Persist migrated config once so options UI sees it
+  // Persist migrated config once so the options UI sees it — and move
+  // any credentials that were sitting in the synced blob (pre-update
+  // installs) out into storage.local.
   if (!config?.targets && cfg.targets) {
-    await chrome.storage.sync.set({ config: cfg });
+    const { config: sanitized, secrets: migratedSecrets } = extractSecrets(cfg);
+    await chrome.storage.sync.set({ config: sanitized });
+    if (Object.keys(migratedSecrets).length) {
+      await chrome.storage.local.set({ secrets: { ...secrets, ...migratedSecrets } });
+    }
   }
   return cfg;
-}
-
-function getServiceMatchers(cfg) {
-  const builtIns = Object.entries(URL_PREFIXES).map(([key, prefixes]) => ({
-    key,
-    prefixes,
-    enabled: !!cfg.services[key]
-  })).filter(s => s.enabled);
-
-  const custom = (cfg.customServices || []).filter(s => s.enabled && s.name && (s.prefixes || []).length > 0)
-    .map(s => ({ key: s.name, prefixes: s.prefixes }));
-
-  return [...custom, ...builtIns];
-}
-
-function matchService(url, cfg) {
-  if (!url) return null;
-  for (const svc of getServiceMatchers(cfg)) {
-    if (svc.prefixes.some(p => url.startsWith(p))) return svc.key;
-  }
-  return null;
 }
 
 async function computeState(cfg) {
@@ -238,23 +221,15 @@ function sameState(a, b) {
   return a.state === b.state && a.service === b.service;
 }
 
-function applyTemplate(str, vars) {
-  return String(str ?? "")
-    .replaceAll("{state}", vars.state ?? "")
-    .replaceAll("{service}", vars.service ?? "")
-    .replaceAll("{url}", vars.url ?? "")
-    .replaceAll("{ts}", String(vars.ts ?? ""));
-}
-
-function backoffMs(attempt) {
-  return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** attempt));
-}
-
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Single fetch with retry-on-network-error (not on bad status — status
+// handling is the caller's job via httpHookSuccess). Optionally reads
+// the response body so the caller can do body matching.
 async function callUrl(url, timeoutSec, fetchOpts = {}) {
+  const readBody = !!fetchOpts.readBody;
   for (let attempt = 0; attempt <= RETRY_MAX; attempt++) {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), Math.max(1, timeoutSec) * 1000);
@@ -266,15 +241,16 @@ async function callUrl(url, timeoutSec, fetchOpts = {}) {
         cache: "no-store",
         signal: ac.signal
       });
-      return { ok: r.ok, status: r.status, error: false };
+      const text = readBody ? await r.text().catch(() => "") : "";
+      return { ok: r.ok, status: r.status, text, error: false };
     } catch {
-      if (attempt >= RETRY_MAX) return { ok: false, status: 0, error: true };
+      if (attempt >= RETRY_MAX) return { ok: false, status: 0, text: "", error: true };
       await sleep(backoffMs(attempt));
     } finally {
       clearTimeout(t);
     }
   }
-  return { ok: false, status: 0, error: true };
+  return { ok: false, status: 0, text: "", error: true };
 }
 
 async function setToolbarIcon(state, cfg) {
@@ -291,28 +267,8 @@ async function setToolbarIcon(state, cfg) {
 
 async function runListenerTarget(target, vars, timeoutSec) {
   if (!target?.enabled || !target?.url) return;
-
-  // Back-compat: if they used old listener URL without tokens, mimic old behavior:
-  // append ?state=...&service=...&url=...&ts=...
-  // If they DO use {state} tokens, we don't append anything.
-  let finalUrl = target.url.trim();
-
-  if (finalUrl.includes("{state}") || finalUrl.includes("{service}") || finalUrl.includes("{url}") || finalUrl.includes("{ts}")) {
-    finalUrl = applyTemplate(finalUrl, vars);
-  } else {
-    try {
-      const u = new URL(finalUrl);
-      u.searchParams.set("state", vars.state);
-      if (vars.service) u.searchParams.set("service", vars.service);
-      if (vars.url) u.searchParams.set("url", vars.url);
-      u.searchParams.set("ts", String(vars.ts));
-      finalUrl = u.toString();
-    } catch {
-      // If invalid URL, just skip
-      return;
-    }
-  }
-
+  const finalUrl = buildListenerUrl(target.url, vars);
+  if (!finalUrl) return;
   await callUrl(finalUrl, timeoutSec).catch(() => {});
 }
 
@@ -366,7 +322,15 @@ async function runHttpHookTarget(target, vars, timeoutSec) {
     if (rendered.length) body = rendered;
   }
 
-  await callUrl(url, timeoutSec, { method, headers, body }).catch(() => {});
+  // Fix 4: evaluate the response with the SAME rules the options Test
+  // button uses (status codes + body match), so a hook that "tests OK"
+  // behaves identically live. We only read the body when a match string
+  // is configured, to avoid pulling response bodies we won't inspect.
+  const needsBody = !!(vars.state === "ON" ? target.matchOn : target.matchOff);
+  const res = await callUrl(url, timeoutSec, { method, headers, body, readBody: needsBody })
+    .catch(() => ({ ok: false, status: 0, text: "", error: true }));
+  const ok = httpHookSuccess(target, vars.state, res);
+  if (!ok) debugLog("httpHook:fail", target.id, vars.state, res.status || res.error);
 }
 
 // Local-first hybrid: tries the device's local HTTP API first with a
@@ -376,14 +340,14 @@ async function runHttpHookTarget(target, vars, timeoutSec) {
 async function runIotHybridTarget(target, vars, timeoutSec) {
   if (!target?.enabled) return;
   const mode = vars.state === "ON"
-    ? (Number.isFinite(+target.modeOn) ? +target.modeOn : 1)
-    : (Number.isFinite(+target.modeOff) ? +target.modeOff : 0);
+    ? clampMode(target.modeOn, 1)
+    : clampMode(target.modeOff, 0);
 
   // 1. Local probe (single fetch, no retries — the meeting state just
   //    changed and we want either an instant success or a quick fall
   //    through to cloud).
   if (target.localBase) {
-    const localTimeoutMs = Math.max(100, Math.min(10000, Number(target.localTimeoutMs) || 1500));
+    const localTimeoutMs = clampLocalTimeoutMs(target.localTimeoutMs, 1500);
     const ac = new AbortController();
     const to = setTimeout(() => ac.abort(), localTimeoutMs);
     try {
@@ -416,11 +380,11 @@ async function applySideEffects(next, cfg) {
   const vars = {
     state: next.state,
     service: next.service || "",
-    url: next.url || "",
+    url: meetingUrlForVars(cfg, next.url), // Fix 3: gated by includeMeetingUrl
     ts: Date.now()
   };
 
-  const timeoutSec = Math.max(1, Math.min(20, parseInt(cfg.timeoutSec ?? 3, 10)));
+  const timeoutSec = clampTimeoutSec(cfg.timeoutSec, 3);
 
   // Fire all enabled targets (don’t block others if one fails)
   const jobs = [];
@@ -455,7 +419,7 @@ async function tick(reason = "") {
     current = { ...next2, ts: Date.now() };
     debugLog("tick:apply", current.state, current.service);
     await applySideEffects(current, cfg2);
-  }, 400);
+  }, DEBOUNCE_MS);
 }
 
 // Tab/window events
@@ -466,8 +430,31 @@ chrome.tabs.onActivated.addListener(() => tick("activated"));
 chrome.windows.onFocusChanged.addListener(() => tick("focus"));
 chrome.windows.onRemoved.addListener(() => tick("window-removed"));
 
-chrome.runtime.onStartup.addListener(() => tick("startup"));
-chrome.runtime.onInstalled.addListener(() => tick("installed"));
+chrome.runtime.onStartup.addListener(() => {
+  ensureReconcileAlarm();
+  tick("startup");
+});
+chrome.runtime.onInstalled.addListener(() => {
+  ensureReconcileAlarm();
+  tick("installed");
+});
+
+// Fix 5: heartbeat so a suspended worker can't leave the sign stale.
+function ensureReconcileAlarm() {
+  try {
+    chrome.alarms.create(RECONCILE_ALARM, { periodInMinutes: RECONCILE_PERIOD_MIN });
+  } catch {
+    // alarms unavailable — the event listeners still cover the common case
+  }
+}
+
+chrome.alarms?.onAlarm.addListener(alarm => {
+  if (alarm?.name === RECONCILE_ALARM) tick("alarm");
+});
+
+// Create the alarm at worker startup too (covers reloads where neither
+// onStartup nor onInstalled fires).
+ensureReconcileAlarm();
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {

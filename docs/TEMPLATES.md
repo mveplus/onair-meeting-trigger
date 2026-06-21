@@ -1,6 +1,8 @@
 # Templates Guide
 
-Templates are preset **HTTP Hook targets** that fill common ON/OFF URL, method, and headers for you.
+Templates are preset **targets** that fill common ON/OFF URLs, methods, headers,
+and (for the AWS IoT bridge) mode settings for you. Most are HTTP Hooks; the
+cloud-bridge and local-first templates are `iotHybrid` targets.
 
 ## Using templates in the UI
 
@@ -18,7 +20,6 @@ Templates are preset **HTTP Hook targets** that fill common ON/OFF URL, method, 
 - Home Assistant Webhook
 - Generic JSON (POST)
 - OnAir Cloud Bridge (AWS IoT Lambda)
-- OnAir Cloud Bridge — Breathing (AWS IoT Lambda)
 - OnAir IoT — local first, AWS fallback
 
 ### OnAir Cloud Bridge — quick setup
@@ -33,30 +34,27 @@ whether you're on the home LAN or not).
 The Lambda reads `thing` and `mode` from the URL query string, so this
 template needs no body templating — just three values to fill in:
 
-| Placeholder | Replace with | Where it comes from |
+| Field | Put in | Where it comes from |
 |---|---|---|
-| `API_ID` | API Gateway HTTP API id | `aws apigatewayv2 get-apis ... --query "Items[?Name=='onair-publish-api'].ApiId" --output text` |
-| `YOUR_THING` | AWS IoT Thing name | e.g. `onair-test-1` — must be in the Lambda's `ALLOWED_THINGS` env var |
-| `REPLACE_WITH_TOKEN` | bearer token | contents of `.onair-bridge-token` next to the deploy script |
+| Cloud endpoint URL | API Gateway HTTP API endpoint | `aws apigatewayv2 get-apis ... --query "Items[?Name=='onair-publish-api'].ApiId" --output text`, then `https://<ApiId>.execute-api.<region>.amazonaws.com` |
+| AWS IoT thing | AWS IoT Thing name | e.g. `onair-test-1` — must be in the Lambda's `ALLOWED_THINGS` env var |
+| Cloud bearer token | bearer token | contents of `.onair-bridge-token` next to the deploy script |
 
-`matchOn` / `matchOff` are pre-set to the exact `"mode":N` substring
-the Lambda echoes back, so the hook can verify the round-trip
-actually reached the Lambda rather than just any HTTP 2xx.
+#### One template, choose Solid or Breathing
 
-#### Solid vs Breathing variants
+This is a **single** cloud-bridge template (type `iotHybrid`, configured
+cloud-only — leave the local fields blank). Rather than shipping a
+separate "Breathing" template, the **ON mode** dropdown picks what the
+"ON" action does; **OFF mode** stays `0` so the meeting-ended flow
+returns the sign to dark either way:
 
-There are two templates that share the same Lambda, differing only in
-what the "ON" action does:
+| ON mode | Effect | Use when… |
+|---|---|---|
+| `1` (on) | solid on for the meeting | You want the sign to stay solid for the duration of the meeting. |
+| `2` (breathing) | soft pulse for the meeting | You prefer a softer pulsing pattern during meetings. |
 
-| Template | ON mode | OFF mode | Use when… |
-|---|---|---|---|
-| **OnAir Cloud Bridge (AWS IoT Lambda)** | `mode=1` (solid on) | `mode=0` (off) | You want the sign to stay solid for the duration of the meeting. |
-| **OnAir Cloud Bridge — Breathing (AWS IoT Lambda)** | `mode=2` (breathing) | `mode=0` (off) | You prefer a softer pulsing pattern during meetings. |
-
-You can also have **both** active at once (use Add HTTP Hook twice and
-pick a different template each time) if you want, say, the bedroom
-sign to pulse and the office sign to stay solid for the same meeting
-event.
+Want one sign solid and another pulsing for the same event? Add the
+template twice and set a different **ON mode** (and `thing`) on each row.
 
 ### Local-first hybrid
 
@@ -95,11 +93,15 @@ Fields:
 
 Templates include placeholders that you should replace:
 
-- `REPLACE_WITH_TOKEN` → your API token (On-Air API) or bearer (AWS IoT Lambda)
+- `REPLACE_WITH_TOKEN` → your On-Air API token
 - `YOUR_TOPIC` → your ntfy.sh topic
-- `YOUR_THING` → AWS IoT Thing name (AWS IoT Lambda)
-- `API_ID` → API Gateway HTTP API id (AWS IoT Lambda)
 - `http://device.local` → your device hostname or IP
+
+The **OnAir Cloud Bridge** and **local-first hybrid** templates seed
+empty fields instead of literal placeholders — the inputs show grey
+hint text (e.g. `https://API_ID.execute-api.eu-west-1.amazonaws.com`,
+`onair-test-1`) so nothing leaks into an Export Settings file until you
+type real values.
 
 ## Heads-up: `*.local` (mDNS) in MV3 service workers
 
@@ -120,8 +122,8 @@ ON URL : http://10.37.22.98/api/set?state=1
 OFF URL: http://10.37.22.98/api/set?state=0
 ```
 
-Or, if you don't want to depend on the LAN path at all, use one of
-the **OnAir Cloud Bridge** templates below — it goes over HTTPS to an
+Or, if you don't want to depend on the LAN path at all, use the
+**OnAir Cloud Bridge** template above — it goes over HTTPS to an
 AWS API Gateway and has no name-resolution dependency.
 
 ## Tokens supported in URLs and bodies
@@ -130,7 +132,10 @@ You can use these in HTTP Hook URLs or bodies:
 
 - `{state}` → `ON` or `OFF`
 - `{service}` → `meet`, `teams`, `zoom` (or `test` during Test buttons)
-- `{url}` → the meeting tab URL (when available)
+- `{url}` → the meeting tab URL — **only when "Include the meeting tab URL in
+  requests" is enabled in Settings** (off by default; otherwise `{url}` resolves
+  to an empty string and the auto-appended `url=` param is omitted, so meeting
+  IDs never leave the browser)
 - `{ts}` → timestamp (unix ms)
 
 ## Adding your own templates (developers)

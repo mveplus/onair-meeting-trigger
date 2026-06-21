@@ -1,3 +1,23 @@
+import {
+  RETRY_MAX,
+  DEFAULT_STATUS_CODES,
+  trimSlash,
+  applyTemplate,
+  backoffMs,
+  normalizePrefixes,
+  normalizeCustomServices,
+  normalizeStatusCodes,
+  clampMode,
+  clampLocalTimeoutMs,
+  clampTimeoutSec,
+  buildListenerUrl,
+  httpHookSuccess,
+  endpointSecurityWarnings,
+  extractSecrets,
+  applySecrets,
+  redactSecrets
+} from "./shared.js";
+
 const DEFAULTS = {
   services: { meet: true, teams: true, zoom: true },
   triggerMode: "ANY_TAB",
@@ -5,14 +25,13 @@ const DEFAULTS = {
   targets: [],
   customServices: [],
   theme: "light",
-  iconMode: "alwaysColor"
+  iconMode: "alwaysColor",
+  // Privacy opt-in (Fix 3): off by default so the meeting tab URL is
+  // never sent to targets unless the user explicitly turns it on.
+  includeMeetingUrl: false
 };
 
-const DEFAULT_STATUS_CODES = [200, 202, 204];
 const KNOWN_STATUS_CODES = [200, 202, 204, 401, 403];
-const RETRY_MAX = 2;
-const RETRY_BASE_MS = 250;
-const RETRY_MAX_MS = 2000;
 const TEMPLATES = {
   tasmota: {
     label: "Tasmota (GET)",
@@ -115,53 +134,34 @@ const TEMPLATES = {
     }
   },
   aws_iot_lambda: {
-    // Cloud bridge for the OnAir LED sign over AWS IoT.
-    // The companion Lambda is in onair-led-sign-firmware →
-    // scripts/cloud-bridge/. It validates a bearer token, reads
-    // `thing` and `mode` from the query string (so this template
-    // doesn't need any body templating), and publishes
-    // {"mode": N} on the device's onair/<thing>/cmd topic.
-    // Replace API_ID, YOUR_THING, and REPLACE_WITH_TOKEN below.
+    // Cloud bridge for the OnAir LED sign over AWS IoT. Talks to the
+    // companion Lambda (onair-led-sign-firmware → scripts/cloud-bridge/),
+    // which validates a bearer token, reads `thing` and `mode` from the
+    // query string, and publishes {"mode": N} on onair/<thing>/cmd.
+    //
+    // Modelled as a cloud-only iotHybrid (no local URL) so the single
+    // "ON mode" dropdown lets the user pick the meeting-active action —
+    // 1 (solid on) or 2 (breathing) — instead of shipping two near
+    // identical templates. OFF is mode 0, so the meeting-ended flow
+    // returns the sign to dark either way.
+    //
+    // The string fields are intentionally empty: the inputs in
+    // renderTargets carry grey `placeholder` hints, so adding this
+    // template gives empty fields plus example text rather than
+    // REPLACE_WITH_* literals that would otherwise leak into an Export
+    // Settings file. The mode/timeout defaults stay populated because
+    // those ARE the real defaults, not placeholders.
     label: "OnAir Cloud Bridge (AWS IoT Lambda)",
     target: {
-      type: "httpHook",
-      onUrl:  "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=1",
-      offUrl: "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=0",
-      method: "POST",
-      headers: [
-        { key: "Authorization", value: "Bearer REPLACE_WITH_TOKEN" }
-      ],
-      body: "",
-      basicAuth: null,
-      checkStatus: true,
-      statusCodes: [...DEFAULT_STATUS_CODES],
-      // Lambda returns json.dumps with default (no-space) separators,
-      // so match on the exact substring it emits per state.
-      matchOn:  "\"mode\":1",
-      matchOff: "\"mode\":0"
-    }
-  },
-  aws_iot_lambda_breathing: {
-    // Same cloud bridge as aws_iot_lambda above, but the "ON" action
-    // triggers breathing mode (mode=2) instead of solid on (mode=1).
-    // Pick this template if you'd rather the sign pulse during
-    // meetings than stay solid — the OFF action is still mode=0,
-    // so the meeting-ended flow returns the sign to dark either way.
-    label: "OnAir Cloud Bridge — Breathing (AWS IoT Lambda)",
-    target: {
-      type: "httpHook",
-      onUrl:  "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=2",
-      offUrl: "https://API_ID.execute-api.eu-west-1.amazonaws.com/?thing=YOUR_THING&mode=0",
-      method: "POST",
-      headers: [
-        { key: "Authorization", value: "Bearer REPLACE_WITH_TOKEN" }
-      ],
-      body: "",
-      basicAuth: null,
-      checkStatus: true,
-      statusCodes: [...DEFAULT_STATUS_CODES],
-      matchOn:  "\"mode\":2",
-      matchOff: "\"mode\":0"
+      type: "iotHybrid",
+      localBase: "",
+      localToken: "",
+      cloudBase: "",
+      cloudToken: "",
+      thing: "",
+      modeOn: 1,
+      modeOff: 0,
+      localTimeoutMs: 1500
     }
   },
   aws_iot_hybrid: {
@@ -204,7 +204,6 @@ function esc(s){
     .replaceAll("\"","&quot;")
     .replaceAll("'","&#39;");
 }
-function trimSlash(s){ return (s || "").replace(/\/+$/, ""); }
 function newId(prefix="t"){ return `${prefix}_${Math.random().toString(16).slice(2,10)}`; }
 
 function showStatus(msg, ok=true) {
@@ -219,7 +218,7 @@ function migrateIfNeeded(config) {
   if (config?.targets && Array.isArray(config.targets)) {
     const cfg = { ...DEFAULTS, ...config };
     cfg.services = { ...DEFAULTS.services, ...(config?.services || {}) };
-    cfg.customServices = normalizeCustomServices(config?.customServices);
+    cfg.customServices = normalizeCustomServices(config?.customServices, newId);
     return cfg;
   }
 
@@ -285,41 +284,11 @@ function getOriginsFromTargets(cfg) {
   return urls;
 }
 
-function normalizePrefixes(prefixes) {
-  if (!Array.isArray(prefixes)) return [];
-  return prefixes.map(p => String(p || "").trim()).filter(Boolean);
-}
-
-function normalizeCustomServices(customServices) {
-  if (!Array.isArray(customServices)) return [];
-  return customServices
-    .map(s => {
-      const name = String(s?.name || "").trim();
-      const prefixes = normalizePrefixes(s?.prefixes || []);
-      if (!name || prefixes.length === 0) return null;
-      return {
-        id: s?.id || newId("svc"),
-        name,
-        enabled: s?.enabled !== false,
-        prefixes
-      };
-    })
-    .filter(Boolean);
-}
-
 function normalizeHeadersList(headers) {
   if (!Array.isArray(headers)) return [];
   return headers
     .map(h => (h && typeof h.key === "string") ? { key: h.key.trim(), value: String(h.value ?? "") } : null)
     .filter(h => h && h.key);
-}
-
-function normalizeStatusCodes(codes) {
-  if (!Array.isArray(codes)) return [...DEFAULT_STATUS_CODES];
-  const out = codes
-    .map(c => parseInt(c, 10))
-    .filter(n => Number.isFinite(n) && n >= 100 && n <= 599);
-  return out.length ? out : [...DEFAULT_STATUS_CODES];
 }
 
 function normalizeTarget(raw) {
@@ -356,9 +325,9 @@ function normalizeTarget(raw) {
       cloudBase,
       cloudToken: String(raw?.cloudToken || ""),
       thing: String(raw?.thing || ""),
-      modeOn: Number.isFinite(+raw?.modeOn) ? +raw.modeOn : 1,
-      modeOff: Number.isFinite(+raw?.modeOff) ? +raw.modeOff : 0,
-      localTimeoutMs: Math.max(100, Math.min(10000, Number(raw?.localTimeoutMs) || 1500))
+      modeOn: clampMode(raw?.modeOn, 1),
+      modeOff: clampMode(raw?.modeOff, 0),
+      localTimeoutMs: clampLocalTimeoutMs(raw?.localTimeoutMs, 1500)
     };
   }
   if (type === "httpHook") {
@@ -662,6 +631,10 @@ function validateTargetNode(node, t) {
     const offUrl = node.querySelector(".t_offUrl")?.value.trim() || "";
     if (!onUrl && !offUrl) warnings.push("Add ON and/or OFF URL");
   }
+  // Fix 2: flag credentials about to travel over cleartext to a non-LAN
+  // host. Built from the live field values so the warning appears as you
+  // type, before Save.
+  warnings.push(...endpointSecurityWarnings(buildTargetFromNode(node, t)));
   return warnings;
 }
 
@@ -680,10 +653,9 @@ function buildTargetFromNode(node, t) {
     base.cloudBase = trimSlash(node.querySelector(".t_cloudBase")?.value.trim() || "");
     base.cloudToken = node.querySelector(".t_cloudToken")?.value.trim() || "";
     base.thing = node.querySelector(".t_thing")?.value.trim() || "";
-    base.modeOn = parseInt(node.querySelector(".t_modeOn")?.value || "1", 10);
-    base.modeOff = parseInt(node.querySelector(".t_modeOff")?.value || "0", 10);
-    base.localTimeoutMs = Math.max(100, Math.min(10000,
-      parseInt(node.querySelector(".t_localTimeoutMs")?.value || "1500", 10)));
+    base.modeOn = clampMode(node.querySelector(".t_modeOn")?.value, 1);
+    base.modeOff = clampMode(node.querySelector(".t_modeOff")?.value, 0);
+    base.localTimeoutMs = clampLocalTimeoutMs(node.querySelector(".t_localTimeoutMs")?.value, 1500);
   } else {
     base.onUrl = node.querySelector(".t_onUrl")?.value.trim() || "";
     base.offUrl = node.querySelector(".t_offUrl")?.value.trim() || "";
@@ -771,8 +743,13 @@ function readTargetsFromUI(cfg) {
 }
 
 async function load() {
-  const { config } = await chrome.storage.sync.get({ config: DEFAULTS });
-  const cfg = migrateIfNeeded(config);
+  const [{ config }, { secrets }] = await Promise.all([
+    chrome.storage.sync.get({ config: DEFAULTS }),
+    chrome.storage.local.get({ secrets: {} })
+  ]);
+  // Fix 1: credentials are stored in storage.local (never synced to the
+  // Google account); merge them back onto the synced, sanitized config.
+  const cfg = applySecrets(migrateIfNeeded(config), secrets);
 
   $("svc_meet").checked = !!cfg.services.meet;
   $("svc_teams").checked = !!cfg.services.teams;
@@ -785,10 +762,11 @@ async function load() {
   updateIconPreview();
   $("theme_switch").checked = (cfg.theme || "light") === "dark";
   applyTheme(cfg.theme || "light");
+  $("include_meeting_url").checked = !!cfg.includeMeetingUrl;
   updateTimeoutPills();
 
   // Store current cfg on window for edits
-  cfg.customServices = normalizeCustomServices(cfg.customServices);
+  cfg.customServices = normalizeCustomServices(cfg.customServices, newId);
   window.__cfg = cfg;
   renderCustomServices(cfg);
   renderTargets(cfg);
@@ -864,11 +842,12 @@ async function save() {
       zoom: $("svc_zoom").checked
     },
     triggerMode: $("mode_select").value || "ANY_TAB",
-    timeoutSec: Math.max(1, Math.min(20, parseInt($("http_timeout").value || "3", 10))),
+    timeoutSec: clampTimeoutSec($("http_timeout").value, 3),
     targets: cfg.targets || [],
     customServices: cfg.customServices || [],
     theme: $("theme_switch").checked ? "dark" : "light",
-    iconMode: $("icon_mode").value || DEFAULTS.iconMode
+    iconMode: $("icon_mode").value || DEFAULTS.iconMode,
+    includeMeetingUrl: $("include_meeting_url").checked
   };
 
   cfg = readCustomServicesFromUI(cfg);
@@ -880,7 +859,14 @@ async function save() {
     if (!ok) return showStatus(`Permission denied for ${url}`, false);
   }
 
-  await chrome.storage.sync.set({ config: cfg });
+  // Fix 1: split credentials out of the synced blob. The sanitized
+  // config goes to storage.sync (mirrored to the user's Google account);
+  // the secrets map goes to storage.local only.
+  const { config: sanitized, secrets } = extractSecrets(cfg);
+  await Promise.all([
+    chrome.storage.sync.set({ config: sanitized }),
+    chrome.storage.local.set({ secrets })
+  ]);
   window.__cfg = cfg;
   showStatus("Saved");
   chrome.runtime.sendMessage({ type: "CONFIG_UPDATED" });
@@ -896,10 +882,12 @@ function exportHooks() {
     zoom: $("svc_zoom").checked
   };
   const triggerMode = $("mode_select").value || "ANY_TAB";
-  const timeoutSec = Math.max(1, Math.min(20, parseInt($("http_timeout").value || "3", 10)));
+  const timeoutSec = clampTimeoutSec($("http_timeout").value, 3);
   const iconMode = $("icon_mode").value || DEFAULTS.iconMode;
 
-  const targets = (cfg.targets || []).map(t => {
+  // Fix 1: never write credentials into an exported file.
+  const safeTargets = redactSecrets({ targets: cfg.targets || [] }).targets || [];
+  const targets = safeTargets.map(t => {
     if (t.type === "listener") {
       return { type: "listener", url: t.url || "", enabled: t.enabled !== false };
     }
@@ -919,9 +907,9 @@ function exportHooks() {
         cloudBase: t.cloudBase || "",
         cloudToken: t.cloudToken || "",
         thing: t.thing || "",
-        modeOn: Number.isFinite(+t.modeOn) ? +t.modeOn : 1,
-        modeOff: Number.isFinite(+t.modeOff) ? +t.modeOff : 0,
-        localTimeoutMs: Math.max(100, Math.min(10000, Number(t.localTimeoutMs) || 1500)),
+        modeOn: clampMode(t.modeOn, 1),
+        modeOff: clampMode(t.modeOff, 0),
+        localTimeoutMs: clampLocalTimeoutMs(t.localTimeoutMs, 1500),
         enabled: t.enabled !== false
       };
     }
@@ -950,7 +938,8 @@ function exportHooks() {
     targets,
     customServices: cfg.customServices || [],
     theme: $("theme_switch").checked ? "dark" : "light",
-    iconMode
+    iconMode,
+    includeMeetingUrl: $("include_meeting_url").checked
   };
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -962,7 +951,7 @@ function exportHooks() {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  showStatus(`Exported ${targets.length} target(s)`);
+  showStatus(`Exported ${targets.length} target(s) — credentials excluded`);
 }
 
 async function importHooksFromFile(file) {
@@ -980,17 +969,18 @@ async function importHooksFromFile(file) {
     } else if (Array.isArray(parsed?.targets)) {
       targets = parsed.targets;
     }
-    if (parsed?.services || parsed?.triggerMode || parsed?.timeoutSec !== undefined || parsed?.theme || parsed?.iconMode) {
+    if (parsed?.services || parsed?.triggerMode || parsed?.timeoutSec !== undefined || parsed?.theme || parsed?.iconMode || parsed?.includeMeetingUrl !== undefined) {
       importedSettings = {
         services: { ...DEFAULTS.services, ...(parsed.services || {}) },
         triggerMode: parsed.triggerMode || DEFAULTS.triggerMode,
-        timeoutSec: Math.max(1, Math.min(20, parseInt(parsed.timeoutSec ?? DEFAULTS.timeoutSec, 10))),
+        timeoutSec: clampTimeoutSec(parsed.timeoutSec ?? DEFAULTS.timeoutSec, DEFAULTS.timeoutSec),
         theme: parsed.theme || DEFAULTS.theme,
-        iconMode: parsed.iconMode || DEFAULTS.iconMode
+        iconMode: parsed.iconMode || DEFAULTS.iconMode,
+        includeMeetingUrl: !!parsed.includeMeetingUrl
       };
     }
     if (Array.isArray(parsed?.customServices)) {
-      customServices = normalizeCustomServices(parsed.customServices);
+      customServices = normalizeCustomServices(parsed.customServices, newId);
     }
 
     const normalizedTargets = targets.map(normalizeTarget).filter(Boolean);
@@ -1006,6 +996,7 @@ async function importHooksFromFile(file) {
       cfg.timeoutSec = importedSettings.timeoutSec;
       cfg.theme = importedSettings.theme;
       cfg.iconMode = importedSettings.iconMode;
+      cfg.includeMeetingUrl = importedSettings.includeMeetingUrl;
 
       $("svc_meet").checked = !!cfg.services.meet;
       $("svc_teams").checked = !!cfg.services.teams;
@@ -1019,6 +1010,7 @@ async function importHooksFromFile(file) {
       updateIconPreview();
       $("theme_switch").checked = (cfg.theme || "light") === "dark";
       applyTheme(cfg.theme || "light");
+      $("include_meeting_url").checked = !!cfg.includeMeetingUrl;
     }
     cfg.targets = [...(cfg.targets || []), ...normalizedTargets];
     if (customServices.length > 0) {
@@ -1034,18 +1026,6 @@ async function importHooksFromFile(file) {
   } catch {
     showStatus("Invalid JSON file", false);
   }
-}
-
-function applyTemplate(str, vars) {
-  return String(str ?? "")
-    .replaceAll("{state}", vars.state ?? "")
-    .replaceAll("{service}", vars.service ?? "")
-    .replaceAll("{url}", vars.url ?? "")
-    .replaceAll("{ts}", String(vars.ts ?? ""));
-}
-
-function backoffMs(attempt) {
-  return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** attempt));
 }
 
 function sleep(ms) {
@@ -1065,20 +1045,8 @@ async function testAll(state) {
 
   const jobs = (cfg.targets || []).filter(t => t.enabled).map(async (t) => {
     if (t.type === "listener") {
-      let url = t.url || "";
-      if (url.includes("{state}") || url.includes("{service}") || url.includes("{url}") || url.includes("{ts}")) {
-        url = applyTemplate(url, vars);
-      } else {
-        try {
-          const u = new URL(url);
-          u.searchParams.set("state", vars.state);
-          u.searchParams.set("service", vars.service);
-          u.searchParams.set("ts", String(vars.ts));
-          url = u.toString();
-        } catch {
-          return { ok:false, name:t.id };
-        }
-      }
+      const url = buildListenerUrl(t.url, vars);
+      if (!url) return { ok:false, name:t.id };
       return fetchWithTimeout(url, { method:"GET" }, timeoutMs).then(ok => ({ ok, name:t.id }));
     }
 
@@ -1120,20 +1088,8 @@ async function fetchWithTimeout(url, opts, timeoutMs, checkStatus = true) {
 async function testSingleTarget(t, vars, timeoutMs) {
   if (!t || !t.enabled) return false;
   if (t.type === "listener") {
-    let url = t.url || "";
-    if (url.includes("{state}") || url.includes("{service}") || url.includes("{url}") || url.includes("{ts}")) {
-      url = applyTemplate(url, vars);
-    } else {
-      try {
-        const u = new URL(url);
-        u.searchParams.set("state", vars.state);
-        u.searchParams.set("service", vars.service);
-        u.searchParams.set("ts", String(vars.ts));
-        url = u.toString();
-      } catch {
-        return false;
-      }
-    }
+    const url = buildListenerUrl(t.url, vars);
+    if (!url) return false;
     return fetchWithTimeout(url, { method:"GET" }, timeoutMs);
   }
   if (t.type === "simpleLed") {
@@ -1186,14 +1142,9 @@ async function testHttpHookTarget(t, vars, timeoutMs, state) {
   }
 
   const body = (method === "GET" || method === "HEAD") ? undefined : (applyTemplate(t.body || "", vars) || undefined);
-  const checkStatus = t.checkStatus !== false;
-  const statusCodes = normalizeStatusCodes(t.statusCodes);
-  const match = state === "ON" ? (t.matchOn || "") : (t.matchOff || "");
+  // Fix 4: same success rule the live background dispatch uses.
   const res = await fetchWithTimeoutResult(url, { method, headers, body }, timeoutMs);
-  if (!checkStatus) return !res.error;
-  const okStatus = statusCodes.includes(res.status);
-  const okBody = match ? (res.text || "").includes(match) : true;
-  return okStatus && okBody;
+  return httpHookSuccess(t, state, res);
 }
 
 async function fetchWithTimeoutResult(url, opts, timeoutMs) {

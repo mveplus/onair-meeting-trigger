@@ -1,0 +1,10 @@
+{
+  "name": "onair-meeting-trigger",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tooling + tests for the ON-AIR Meeting Trigger MV3 extension (the shippable extension lives in extension/).",
+  "scripts": {
+    "test": "node --test"
+  }
+}
