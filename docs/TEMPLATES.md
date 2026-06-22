@@ -2,7 +2,7 @@
 
 Templates are preset **targets** that fill common ON/OFF URLs, methods, headers,
 and (for the AWS IoT bridge) mode settings for you. Most are HTTP Hooks; the
-cloud-bridge and local-first templates are `iotHybrid` targets.
+local-first hybrid template is an `iotHybrid` target.
 
 ## Using templates in the UI
 
@@ -20,34 +20,39 @@ cloud-bridge and local-first templates are `iotHybrid` targets.
 - ntfy.sh (placeholder topic)
 - Home Assistant Webhook
 - Generic JSON (POST)
-- OnAir Cloud Bridge (AWS IoT Lambda)
 - OnAir IoT — local first, AWS fallback
 
-### OnAir Cloud Bridge — quick setup
+### OnAir IoT — local first, AWS fallback
 
-Pairs with the companion Lambda + API Gateway in the
+`OnAir IoT — local first, AWS fallback` is a **single-row** target
+(type `iotHybrid`, not `httpHook`) that does what two parallel hooks
+can't: try the device's local HTTP API first, fall back to the AWS IoT
+cloud bridge only if local is unreachable inside a per-row timeout.
+Exactly one command reaches the device per meeting event — no duplicate
+publishes. Leave the **local** fields blank to run it cloud-only (drives
+the sign from anywhere on the internet); leave the **cloud** fields
+blank to run it LAN-only.
+
+When to pick this:
+
+- You're on home Wi-Fi most of the time and want the snappy
+  on-LAN response, **but** you also want it to "just work" when you're
+  off-LAN without manually switching configs.
+- You want one row per sign instead of two (`local` + `cloud`)
+  with the indistinguishable Test buttons.
+
+The cloud half pairs with the companion Lambda + API Gateway in the
 [`onair-led-sign-firmware`](https://github.com/mveplus/onair-led-sign-firmware)
 repo under `scripts/cloud-bridge/`. After deploying that you get an
-API Gateway endpoint and a bearer token; plug them into this template
-to drive the sign from anywhere on the internet (works the same
-whether you're on the home LAN or not).
-
-The Lambda reads `thing` and `mode` from the URL query string, so this
-template needs no body templating — just three values to fill in:
-
-| Field | Put in | Where it comes from |
-|---|---|---|
-| Cloud endpoint URL | API Gateway HTTP API endpoint | `aws apigatewayv2 get-apis ... --query "Items[?Name=='onair-publish-api'].ApiId" --output text`, then `https://<ApiId>.execute-api.<region>.amazonaws.com` |
-| AWS IoT thing | AWS IoT Thing name | e.g. `onair-test-1` — must be in the Lambda's `ALLOWED_THINGS` env var |
-| Cloud bearer token | bearer token | contents of `.onair-bridge-token` next to the deploy script |
+API Gateway endpoint and a bearer token. The Lambda reads `thing` and
+`mode` from the URL query string, so this template needs no body
+templating.
 
 #### One template, choose Solid or Breathing
 
-This is a **single** cloud-bridge template (type `iotHybrid`, configured
-cloud-only — leave the local fields blank). Rather than shipping a
-separate "Breathing" template, the **ON mode** dropdown picks what the
-"ON" action does; **OFF mode** stays `0` so the meeting-ended flow
-returns the sign to dark either way:
+Rather than shipping a separate "Breathing" template, the **ON mode**
+dropdown picks what the "ON" action does; **OFF mode** stays `0` so the
+meeting-ended flow returns the sign to dark either way:
 
 | ON mode | Effect | Use when… |
 |---|---|---|
@@ -56,22 +61,6 @@ returns the sign to dark either way:
 
 Want one sign solid and another pulsing for the same event? Add the
 template twice and set a different **ON mode** (and `thing`) on each row.
-
-### Local-first hybrid
-
-`OnAir IoT — local first, AWS fallback` is a **single-row** target
-(type `iotHybrid`, not `httpHook`) that does what two parallel hooks
-can't: try local first, fall back to cloud only if local is
-unreachable inside a per-row timeout. Exactly one command reaches the
-device per meeting event — no duplicate publishes.
-
-When to pick this over the cloud-only templates above:
-
-- You're on home Wi-Fi most of the time and want the snappy
-  on-LAN response, **but** you also want it to "just work" when you're
-  off-LAN without manually switching configs.
-- You want one row per sign instead of two (`local` + `cloud`)
-  with the indistinguishable Test buttons.
 
 The template seeds **empty** string fields so a fresh Export Settings
 file never carries `REPLACE_WITH_*` placeholders by accident — fill
@@ -98,7 +87,7 @@ Templates include placeholders that you should replace:
 - `YOUR_TOPIC` → your ntfy.sh topic
 - `http://device.local` → your device hostname or IP
 
-The **OnAir Cloud Bridge** and **local-first hybrid** templates seed
+The **OnAir IoT** local-first hybrid template seeds
 empty fields instead of literal placeholders — the inputs show grey
 hint text (e.g. `https://API_ID.execute-api.eu-west-1.amazonaws.com`,
 `onair-test-1`) so nothing leaks into an Export Settings file until you
@@ -124,8 +113,9 @@ OFF URL: http://10.37.22.98/api/set?state=0
 ```
 
 Or, if you don't want to depend on the LAN path at all, use the
-**OnAir Cloud Bridge** template above — it goes over HTTPS to an
-AWS API Gateway and has no name-resolution dependency.
+**OnAir IoT** template above configured cloud-only (leave the local
+fields blank) — it goes over HTTPS to an AWS API Gateway and has no
+name-resolution dependency.
 
 ## Tokens supported in URLs and bodies
 

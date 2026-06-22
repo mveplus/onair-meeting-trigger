@@ -138,42 +138,11 @@ const TEMPLATES = {
       matchOff: ""
     }
   },
-  aws_iot_lambda: {
-    // Cloud bridge for the OnAir LED sign over AWS IoT. Talks to the
-    // companion Lambda (onair-led-sign-firmware → scripts/cloud-bridge/),
-    // which validates a bearer token, reads `thing` and `mode` from the
-    // query string, and publishes {"mode": N} on onair/<thing>/cmd.
-    //
-    // Modelled as a cloud-only iotHybrid (no local URL) so the single
-    // "ON mode" dropdown lets the user pick the meeting-active action —
-    // 1 (solid on) or 2 (breathing) — instead of shipping two near
-    // identical templates. OFF is mode 0, so the meeting-ended flow
-    // returns the sign to dark either way.
-    //
-    // The string fields are intentionally empty: the inputs in
-    // renderTargets carry grey `placeholder` hints, so adding this
-    // template gives empty fields plus example text rather than
-    // REPLACE_WITH_* literals that would otherwise leak into an Export
-    // Settings file. The mode/timeout defaults stay populated because
-    // those ARE the real defaults, not placeholders.
-    label: "OnAir Cloud Bridge (AWS IoT Lambda)",
-    target: {
-      type: "iotHybrid",
-      localBase: "",
-      localToken: "",
-      cloudBase: "",
-      cloudToken: "",
-      thing: "",
-      modeOn: 1,
-      modeOff: 0,
-      localTimeoutMs: 1500
-    }
-  },
   aws_iot_hybrid: {
     // Local-first hybrid: tries the device's local HTTP API first
     // (~30 ms on LAN) and falls back to the AWS IoT cloud bridge on
     // failure or timeout. This is the single-row equivalent of
-    // enabling both "On-Air API" and "OnAir Cloud Bridge" in
+    // enabling both "On-Air API" and a cloud bridge in
     // parallel, but with proper fall-through semantics so the device
     // receives exactly one command per event.
     //
