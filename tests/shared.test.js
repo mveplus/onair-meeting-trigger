@@ -400,7 +400,7 @@ describe("dev build badge: formatBuildBadge", () => {
 describe('"Add target" dropdown: resolveAddChoice', () => {
   const templates = {
     tasmota: { label: "Tasmota (GET)", target: { type: "httpHook" } },
-    aws_iot_lambda: { label: "Cloud Bridge", target: { type: "iotHybrid" } }
+    aws_iot_hybrid: { label: "OnAir IoT", target: { type: "iotHybrid" } }
   };
 
   test("placeholder maps to a no-op", () => {
@@ -414,7 +414,7 @@ describe('"Add target" dropdown: resolveAddChoice', () => {
 
   test("template choices carry the template key and its target type", () => {
     assert.deepEqual(resolveAddChoice("tasmota", templates), { kind: "template", templateKey: "tasmota", type: "httpHook" });
-    assert.deepEqual(resolveAddChoice("aws_iot_lambda", templates), { kind: "template", templateKey: "aws_iot_lambda", type: "iotHybrid" });
+    assert.deepEqual(resolveAddChoice("aws_iot_hybrid", templates), { kind: "template", templateKey: "aws_iot_hybrid", type: "iotHybrid" });
   });
 
   test("unrecognized values resolve to 'unknown'", () => {
