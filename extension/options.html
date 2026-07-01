@@ -583,6 +583,21 @@
       <div id="targets"></div>
     </div>
 
+    <div class="card">
+      <h2>Diagnostics</h2>
+      <p class="muted" style="margin:-4px 0 12px;">The service worker sleeps aggressively, so live console logs are unreliable — turn this on to record a persistent, human-readable activity trail instead.</p>
+      <label class="checkItem" style="margin:0 0 12px;"
+             title="Records every state change and reconcile action to a rolling log.">
+        <input type="checkbox" id="debug_logs">
+        <span class="checkBox"></span>
+        <span>Enable debug logging</span>
+      </label>
+      <div class="btns">
+        <button id="open_diagnostics">Open diagnostics…</button>
+      </div>
+      <p class="muted" style="margin:10px 0 0;">Opens the live log in a new tab. It's also available as an <b>ON-AIR</b> panel in Chrome DevTools.</p>
+    </div>
+
     <div class="btns" style="min-height:20px;">
       <span class="status" id="status"></span>
     </div>

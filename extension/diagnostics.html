@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ON-AIR · Diagnostics</title>
+  <style>
+    :root {
+      --bg: #0b0d10; --fg: #e6e9ef; --muted: #8b95a5; --card: #14181e;
+      --line: #232a33; --accent: #3b82f6;
+      --ok: #22c55e; --warn: #f59e0b; --error: #ef4444; --info: #38bdf8;
+    }
+    @media (prefers-color-scheme: light) {
+      :root { --bg: #f6f7f9; --fg: #1a1f27; --muted: #626b78; --card: #fff; --line: #e4e8ee; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font: 13px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: var(--fg);
+    }
+    header {
+      position: sticky; top: 0; z-index: 2; background: var(--bg);
+      border-bottom: 1px solid var(--line); padding: 10px 14px;
+      display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    }
+    header h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 650; }
+    .spacer { flex: 1 1 auto; }
+    select, button {
+      font: inherit; color: var(--fg); background: var(--card);
+      border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px; cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button.danger:hover { border-color: var(--error); }
+    label.inline { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); cursor: pointer; }
+    .banner {
+      margin: 10px 14px 0; padding: 8px 12px; border-radius: 8px;
+      background: color-mix(in srgb, var(--warn) 16%, transparent);
+      border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+      color: var(--fg); font-size: 12px;
+    }
+    .banner[hidden] { display: none; }
+    #log { padding: 10px 14px 40px; }
+    .entry {
+      background: var(--card); border: 1px solid var(--line);
+      border-left: 3px solid var(--muted); border-radius: 8px;
+      padding: 8px 12px; margin-bottom: 8px;
+    }
+    .entry.ok { border-left-color: var(--ok); }
+    .entry.warn { border-left-color: var(--warn); }
+    .entry.error { border-left-color: var(--error); }
+    .entry.info { border-left-color: var(--info); }
+    .entry.muted { border-left-color: var(--muted); }
+    .entryHead { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+    .time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+    .headline { font-weight: 600; }
+    .reason { color: var(--muted); font-size: 12px; }
+    .lines { margin: 4px 0 0; padding: 0; list-style: none; }
+    .lines li { padding: 1px 0 1px 16px; position: relative; }
+    .lines li::before { content: "•"; position: absolute; left: 2px; color: var(--muted); }
+    .lines li.ok::before { content: "✓"; color: var(--ok); }
+    .lines li.warn::before { content: "⚠"; color: var(--warn); }
+    .lines li.error::before { content: "✗"; color: var(--error); }
+    .lines li.muted::before { content: "·"; color: var(--muted); }
+    .empty { color: var(--muted); padding: 30px 14px; text-align: center; }
+    .count { color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ON-AIR · Diagnostics</h1>
+    <label class="inline" title="Records state changes and reconcile actions to a rolling log.">
+      <input type="checkbox" id="debug_logs"> Logging on
+    </label>
+    <select id="filter" title="Filter events">
+      <option value="all">All events</option>
+      <option value="errors">Errors only</option>
+      <option value="change">State changes</option>
+      <option value="reconcile">Reconciles</option>
+      <option value="worker">Worker lifecycle</option>
+    </select>
+    <label class="inline"><input type="checkbox" id="live" checked> Live</label>
+    <span class="spacer"></span>
+    <span class="count" id="count"></span>
+    <button id="refresh">Refresh</button>
+    <button id="copy">Copy report</button>
+    <button id="clear" class="danger">Clear</button>
+  </header>
+
+  <div class="banner" id="off_banner" hidden>
+    Debug logging is <b>off</b> — enable “Logging on” above, reproduce the issue, then watch it appear here.
+  </div>
+
+  <div id="log"><div class="empty">Loading…</div></div>
+
+  <script type="module" src="diagnostics.js"></script>
+</body>
+</html>

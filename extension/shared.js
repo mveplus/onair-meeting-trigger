@@ -22,6 +22,186 @@ export const URL_PREFIXES = {
 // LED "mode" values understood by the firmware / cloud bridge.
 export const VALID_MODES = [0, 1, 2]; // 0 = off, 1 = solid on, 2 = breathing
 
+// ---- reconcile policy --------------------------------------------------
+//
+// How the 1-minute reconcile heartbeat treats each target, once a
+// meeting state has already been dispatched on its ON<->OFF edge:
+//   single — fire ONCE on the edge, never re-fire. The only safe mode
+//            for notification targets (Ntfy/listener) so a suspended-then
+//            -woken service worker can't spam duplicate "in a meeting"
+//            pushes (the original bug).
+//   verify — on each heartbeat, read the device's ACTUAL state and re-fire
+//            only if it drifted from the desired state. Needs a readback
+//            endpoint, so it's only offered where one exists.
+//   always — blindly re-assert the set on every heartbeat. Harmless for
+//            idempotent device setters (a duplicate mode= just re-sets the
+//            same value); never offered for notifications (would spam).
+export const RECONCILE_MODES = ["single", "verify", "always"];
+
+export const DEFAULT_RECONCILE = {
+  listener: "single",
+  httpHook: "single",
+  simpleLed: "verify",
+  iotHybrid: "verify"
+};
+
+// Which reconcile modes a given target TYPE can actually support. The
+// options UI shows only these; anything else collapses to the type's
+// default. `verify` is offered only where a state/reachability readback
+// exists (simpleLed's /led/status, iotHybrid's /api/status).
+export function reconcileModesFor(type) {
+  if (type === "listener") return ["single"];              // notification only
+  if (type === "httpHook") return ["single", "always"];    // no readback
+  if (type === "simpleLed" || type === "iotHybrid") return ["single", "verify", "always"];
+  return ["single"];
+}
+
+// Resolve a target's effective reconcile mode, clamped to what its type
+// supports (a hand-edited import can't smuggle `verify` onto Ntfy).
+export function resolveReconcile(target) {
+  const type = target?.type;
+  const want = target?.reconcile;
+  if (want && reconcileModesFor(type).includes(want)) return want;
+  return DEFAULT_RECONCILE[type] || "single";
+}
+
+// Fold the legacy simpleLed `verifyStatus` boolean into the reconcile
+// field: a target that had "verify status" turned on wanted its state
+// re-asserted, which is now `verify`; off means fire once (`single`).
+// Idempotent — leaves an already-migrated target untouched.
+export function migrateReconcile(target) {
+  const t = { ...target };
+  if (!t.reconcile) {
+    if (t.type === "simpleLed") t.reconcile = t.verifyStatus ? "verify" : "single";
+    else t.reconcile = DEFAULT_RECONCILE[t.type] || "single";
+  }
+  t.reconcile = resolveReconcile(t);
+  return t;
+}
+
+// ---- diagnostics: humanize the activity log ---------------------------
+//
+// Pure formatters shared by the diagnostics page / DevTools panel so the
+// raw ring-buffer entries render as plain English with a severity, and so
+// the mapping is unit-tested rather than reinvented in the UI.
+
+export const MODE_LABELS = { 0: "off", 1: "on", 2: "breathing" };
+
+export function modeLabel(n) {
+  return Object.prototype.hasOwnProperty.call(MODE_LABELS, n) ? MODE_LABELS[n] : String(n);
+}
+
+const TYPE_LABELS = {
+  listener: "Listener",
+  httpHook: "HTTP hook",
+  simpleLed: "LED sign",
+  iotHybrid: "IoT sign"
+};
+
+export function friendlyTargetType(type) {
+  return TYPE_LABELS[type] || type || "target";
+}
+
+const SEVERITY_RANK = { info: 0, muted: 1, ok: 2, warn: 3, error: 4 };
+
+// Severity of a single target outcome within a log entry.
+export function targetSeverity(t) {
+  if (!t) return "muted";
+  if (t.ok === false) return "error";
+  if (t.action === "remediate" || t.drift === true) return "warn";
+  if (t.noop) return "muted";
+  return "ok";
+}
+
+// Overall severity of a log entry = worst of its targets (worker
+// lifecycle markers are informational).
+export function logSeverity(entry) {
+  if (entry?.kind === "worker") return "info";
+  let worst = "muted";
+  for (const t of entry?.targets || []) {
+    const s = targetSeverity(t);
+    if (SEVERITY_RANK[s] > SEVERITY_RANK[worst]) worst = s;
+  }
+  return worst;
+}
+
+// One plain-English line describing what happened to a target.
+export function describeTargetLine(t) {
+  const name = friendlyTargetType(t?.type);
+  const severity = targetSeverity(t);
+  let text;
+  if (t?.ok === false) {
+    text = `${name} failed`;
+    if (t.status) text += ` (HTTP ${t.status})`;
+    if (t.error) text += ` — ${t.error}`;
+  } else if (t?.action === "remediate") {
+    text = `${name} drifted (was ${modeLabel(t.actual)}) — corrected`;
+    if (t.via) text += ` via ${t.via}`;
+  } else if (t?.action === "reassert") {
+    text = `${name} re-asserted`;
+    if (t.via) text += ` via ${t.via}`;
+  } else if (t?.noop) {
+    text = (t.actual !== undefined && t.actual !== null)
+      ? `${name} already correct (${modeLabel(t.actual)})`
+      : `${name} — nothing to do`;
+  } else {
+    text = `${name} fired`;
+    if (t?.via) text += ` via ${t.via}`;
+    if (t?.status) text += ` (HTTP ${t.status})`;
+  }
+  if (t && typeof t.ms === "number") text += ` · ${t.ms} ms`;
+  return { severity, text };
+}
+
+// A whole log entry, humanized: a headline, the trigger, and per-target
+// lines. `ts` is left raw for the UI to format in the local timezone.
+export function describeLogEntry(entry) {
+  if (!entry) return { severity: "muted", ts: 0, headline: "—", reason: "", lines: [] };
+  if (entry.kind === "worker") {
+    return {
+      severity: "info",
+      ts: entry.ts,
+      headline: `Service worker ${entry.event || "event"}`,
+      reason: entry.reason || "",
+      lines: []
+    };
+  }
+  const meeting = entry.to === "ON"
+    ? `In meeting${entry.service ? ` (${entry.service})` : ""}`
+    : "No meeting";
+  const kind = entry.kind === "reconcile" ? "Reconcile" : "State change";
+  return {
+    severity: logSeverity(entry),
+    ts: entry.ts,
+    headline: `${kind} · ${meeting}`,
+    reason: entry.reason || (entry.kind === "reconcile" ? "alarm" : ""),
+    lines: (entry.targets || []).map(describeTargetLine)
+  };
+}
+
+// Parse a firmware `/api/status` JSON body into a normalized mode
+// (0=off, 1=on, 2=breathing), or null when the body doesn't tell us.
+// Prefers the explicit `output_mode` string; falls back to the legacy
+// `state` boolean for older firmware.
+export function parseDeviceMode(json) {
+  if (!json || typeof json !== "object") return null;
+  const om = String(json.output_mode || "").toLowerCase();
+  if (om === "off") return 0;
+  if (om === "on") return 1;
+  if (om === "breathing") return 2;
+  if (typeof json.state === "boolean") return json.state ? 1 : 0;
+  return null;
+}
+
+// Compare the device's actual mode to what we want:
+//   true  — drifted, remediation needed
+//   false — matches, do nothing
+//   null  — unknown (no readback / unreachable); caller decides
+export function reconcileDrift(desiredMode, actualMode) {
+  if (actualMode === null || actualMode === undefined) return null;
+  return clampMode(actualMode, -1) !== clampMode(desiredMode, -1);
+}
+
 // Header keys we treat as credentials: kept out of synced storage and
 // redacted from exported settings (see extractSecrets / redactSecrets).
 export const SECRET_HEADER_KEYS = ["authorization", "x-api-token"];
@@ -422,9 +602,9 @@ export function describeMeetingState(state, service) {
 // ---- settings dirty detection -----------------------------------------
 
 function canonTarget(t) {
-  const base = { type: t.type, enabled: t.enabled !== false };
+  const base = { type: t.type, enabled: t.enabled !== false, reconcile: resolveReconcile(t) };
   if (t.type === "listener") return { ...base, url: t.url || "" };
-  if (t.type === "simpleLed") return { ...base, baseUrl: t.baseUrl || "", verifyStatus: !!t.verifyStatus };
+  if (t.type === "simpleLed") return { ...base, baseUrl: t.baseUrl || "" };
   if (t.type === "iotHybrid") {
     return {
       ...base,
