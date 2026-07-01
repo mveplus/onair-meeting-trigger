@@ -16,6 +16,9 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXT="$REPO/extension"
 DEST="$REPO/resources/store"
+# Hand-captured source shots that can't be rendered headless (they include
+# the real browser chrome / toolbar). Framed into branded tiles below.
+STORE_SRC="$REPO/resources/store-src"
 WORK="$(mktemp -d)"
 SITE="$WORK/site"
 RAW="$WORK/raw"; PROC="$WORK/proc"; TILES="$WORK/tiles"
@@ -205,8 +208,17 @@ textblock t4_txt.png 520 50 28 "Private by design, dark mode included" \
 magick t4_bg.png t4_card.png -gravity West -geometry +100+0 -composite \
   t4_txt.png -gravity East -geometry +70+0 -composite "$TILES/4_popup_privacy.png"
 
+# 5 — in-browser toolbar context (hand-captured; text left, card right)
+bg t5_bg.png
+magick "$STORE_SRC/05_toolbar_raw.png" -background white -alpha remove -alpha off t5_src.png
+card t5_src.png 548 22 '#dfe8ea' t5_card.png
+textblock t5_txt.png 470 56 29 "Live status, right in your toolbar" \
+  "Click the icon to check your ON-AIR state, pause the sign, or jump to settings — without leaving your meeting."
+magick t5_bg.png t5_txt.png -gravity West -geometry +80+0 -composite \
+  t5_card.png -gravity East -geometry +110+0 -composite "$TILES/5_toolbar.png"
+
 # --- export 8-bit, 24-bit, no alpha (store-ready) ---------------------
-for f in 1_popup_status 2_options_setup 3_options_iot 4_popup_privacy; do
+for f in 1_popup_status 2_options_setup 3_options_iot 4_popup_privacy 5_toolbar; do
   magick "$TILES/$f.png" -background "$INK" -alpha remove -alpha off -depth 8 -strip \
     "PNG24:$DEST/$f.png"
 done
