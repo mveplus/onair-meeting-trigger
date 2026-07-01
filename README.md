@@ -10,7 +10,7 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 - Chromium / Chrome extension [now published at CWS](https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn?utm_source=item-share-cb)
 - LAN-first, no cloud required e.g. [OnAir Led/Neon sign](https://github.com/mveplus/onair-led-sign-firmware) 
 - Works great with Home Assistant
-- Works without Smart Home hardware [Phone push notifications](docs/ON-AIR-Push-Notifications.md)
+- Works without Smart Home hardware — [phone push notifications via Ntfy](docs/ON-AIR-Push-Notifications.md)
 
 👉 **Full documentation:**  [extension/README.md](extension/README.md)
   
@@ -20,7 +20,9 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 - Meeting detection (Meet / Teams / Zoom)
 - Custom service detection (user-defined URL prefixes)
 - HTTP hooks (Home Assistant, Tasmota, Shelly, ESP)
+- **Phone push notifications** via [Ntfy](https://ntfy.sh) or any webhook — get pinged when a meeting starts/ends, no smart-home hardware required
 - **IoT (local + cloud)** target type — tries the device's local HTTP API first and transparently falls back to **your own** AWS IoT MQTT publish (via your own API Gateway + Lambda) when off-LAN. Bring-your-own-cloud, no third-party in the loop.
+- **Per-target reconcile modes** (fire-once / verify / re-assert) — keeps your sign in sync and self-heals a missed command, without duplicate notifications
 - Toolbar popup with at-a-glance ON-AIR status and one-click **Pause** (1 hour / until you resume)
 - Redesigned settings UI with an unsaved-changes save bar
 - Built-in templates for common targets, including the OnAir IoT local-first-with-AWS-fallback hybrid — pick solid or breathing from the ON-mode dropdown
