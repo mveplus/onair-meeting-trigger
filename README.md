@@ -49,6 +49,10 @@ This will:
 - trigger an automated GitHub Release with a ZIP artifact
 
 
+## Credits
+
+Built with the help of AI coding assistants — [OpenAI Codex](https://openai.com/index/introducing-codex/) and [Claude Code](https://claude.com/claude-code).
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
