@@ -108,6 +108,55 @@ Use the **OnAir IoT — local first, AWS fallback** template from the
 template dropdown to get a row pre-shaped with the right field
 layout and mode defaults (1 / 0).
 
+### Reconcile behavior (per target)
+
+The extension re-checks meeting state on a 1-minute heartbeat so a
+suspended service worker can't leave a target stale. Each target chooses
+how that heartbeat treats it (under **Reconcile behavior** on the target):
+
+- **Fire once on change** (`single`) — the target fires only when a
+  meeting genuinely starts or ends, never on the heartbeat. This is the
+  only mode for notification targets (Ntfy/listener) so a worker that
+  Chrome sleeps and re-wakes can't send duplicate "in a meeting" pushes.
+- **Verify state & remediate** (`verify`) — on each heartbeat the
+  extension reads the device's *actual* state and re-sends the command
+  **only if it drifted**. Available where a readback exists: the LED sign
+  target (`/led/status` reachability) and the IoT target's local leg
+  (`/api/status`, which reports `output_mode`). No drift → no request.
+- **Re-assert every minute** (`always`) — blindly re-sends the desired
+  state each heartbeat. Harmless for idempotent devices; not offered for
+  notifications. Use this for the IoT **cloud/Lambda** leg, which has no
+  state readback yet, when you want it kept fresh regardless.
+
+Defaults: notifications → *fire once*; LED / IoT → *verify*. The old
+"Verify using `/led/status`" checkbox is migrated automatically to the
+*verify* reconcile mode.
+
+### Diagnostics
+
+Because MV3 keeps suspending the service worker, live console logs are
+unreliable. Turn on **Enable debug logging** in the options page's
+*Diagnostics* card to record a persistent, rolling trail of every state
+change, reconcile action, and worker cold-start — with per-target
+outcomes in plain English (which fired, HTTP status, latency, detected
+drift, and the actual error text on failures).
+
+View it two ways, both showing the same live log:
+
+- **Options → Open diagnostics…** opens it in a browser tab.
+- A dedicated **ON-AIR** panel in Chrome DevTools (F12).
+
+The viewer updates live, filters by *Errors / State changes / Reconciles
+/ Worker lifecycle*, and has a **Copy report** button that bundles the
+log with your redacted config and extension/Chrome versions — the thing
+to paste into a bug report. (Kept out of the settings page so it stays
+uncluttered.)
+
+For the lowest-level view, `chrome://extensions → ON-AIR → “Inspect
+views: service worker”` gives you Chrome's own console + Network tab —
+complementary to the in-extension log, which exists precisely because
+that inspector dies when the worker sleeps.
+
 #### Tasmota example
 Turn a Tasmota relay on/off via HTTP:
 

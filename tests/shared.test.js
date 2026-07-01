@@ -35,7 +35,18 @@ import {
   describePause,
   countEnabledTargets,
   describeMeetingState,
-  settingsSignature
+  settingsSignature,
+  reconcileModesFor,
+  resolveReconcile,
+  migrateReconcile,
+  parseDeviceMode,
+  reconcileDrift,
+  DEFAULT_RECONCILE,
+  modeLabel,
+  targetSeverity,
+  logSeverity,
+  describeTargetLine,
+  describeLogEntry
 } from "../extension/shared.js";
 
 // ---------------------------------------------------------------------------
@@ -498,5 +509,167 @@ describe("UI: settingsSignature (dirty detection)", () => {
     const c = cfg();
     c.services.teams = true;
     assert.notEqual(settingsSignature(a), settingsSignature(c));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reconcile policy (single / verify / always) + device state readback
+// ---------------------------------------------------------------------------
+
+describe("reconcile policy", () => {
+  test("reconcileModesFor constrains modes by target type", () => {
+    assert.deepEqual(reconcileModesFor("listener"), ["single"]);
+    assert.deepEqual(reconcileModesFor("httpHook"), ["single", "always"]);
+    assert.deepEqual(reconcileModesFor("simpleLed"), ["single", "verify", "always"]);
+    assert.deepEqual(reconcileModesFor("iotHybrid"), ["single", "verify", "always"]);
+    assert.deepEqual(reconcileModesFor("bogus"), ["single"]);
+  });
+
+  test("resolveReconcile falls back to the type default when unset", () => {
+    assert.equal(resolveReconcile({ type: "listener" }), "single");
+    assert.equal(resolveReconcile({ type: "httpHook" }), "single");
+    assert.equal(resolveReconcile({ type: "simpleLed" }), "verify");
+    assert.equal(resolveReconcile({ type: "iotHybrid" }), "verify");
+  });
+
+  test("resolveReconcile clamps an unsupported mode back to the default", () => {
+    // verify isn't valid for a notification target — must not stick
+    assert.equal(resolveReconcile({ type: "listener", reconcile: "verify" }), "single");
+    assert.equal(resolveReconcile({ type: "listener", reconcile: "always" }), "single");
+    assert.equal(resolveReconcile({ type: "httpHook", reconcile: "verify" }), "single");
+    // a valid choice is honored
+    assert.equal(resolveReconcile({ type: "httpHook", reconcile: "always" }), "always");
+    assert.equal(resolveReconcile({ type: "simpleLed", reconcile: "single" }), "single");
+  });
+
+  test("migrateReconcile folds legacy verifyStatus into reconcile", () => {
+    assert.equal(migrateReconcile({ type: "simpleLed", verifyStatus: true }).reconcile, "verify");
+    assert.equal(migrateReconcile({ type: "simpleLed", verifyStatus: false }).reconcile, "single");
+    // non-LED types get their default
+    assert.equal(migrateReconcile({ type: "listener" }).reconcile, "single");
+    assert.equal(migrateReconcile({ type: "iotHybrid" }).reconcile, "verify");
+  });
+
+  test("migrateReconcile is idempotent and honors an explicit reconcile", () => {
+    const once = migrateReconcile({ type: "simpleLed", verifyStatus: true });
+    const twice = migrateReconcile(once);
+    assert.equal(twice.reconcile, "verify");
+    // explicit reconcile wins over the legacy flag
+    assert.equal(migrateReconcile({ type: "simpleLed", reconcile: "single", verifyStatus: true }).reconcile, "single");
+  });
+
+  test("DEFAULT_RECONCILE never defaults a notification target to a re-firing mode", () => {
+    assert.equal(DEFAULT_RECONCILE.listener, "single");
+  });
+});
+
+describe("device state readback", () => {
+  test("parseDeviceMode reads output_mode strings", () => {
+    assert.equal(parseDeviceMode({ output_mode: "off" }), 0);
+    assert.equal(parseDeviceMode({ output_mode: "on" }), 1);
+    assert.equal(parseDeviceMode({ output_mode: "breathing" }), 2);
+    assert.equal(parseDeviceMode({ output_mode: "ON" }), 1); // case-insensitive
+  });
+
+  test("parseDeviceMode falls back to the legacy state boolean", () => {
+    assert.equal(parseDeviceMode({ state: true }), 1);
+    assert.equal(parseDeviceMode({ state: false }), 0);
+  });
+
+  test("parseDeviceMode returns null when it can't tell", () => {
+    assert.equal(parseDeviceMode(null), null);
+    assert.equal(parseDeviceMode({}), null);
+    assert.equal(parseDeviceMode("nope"), null);
+    assert.equal(parseDeviceMode({ output_mode: "purple" }), null);
+  });
+
+  test("reconcileDrift compares desired vs actual", () => {
+    assert.equal(reconcileDrift(1, 1), false);   // matches
+    assert.equal(reconcileDrift(1, 0), true);    // drifted
+    assert.equal(reconcileDrift(2, 1), true);
+    assert.equal(reconcileDrift(1, null), null); // unknown — caller decides
+    assert.equal(reconcileDrift(1, undefined), null);
+  });
+});
+
+describe("settingsSignature reconcile awareness", () => {
+  const led = (reconcile) => ({
+    services: { meet: true }, targets: [{ id: "x", type: "simpleLed", enabled: true, baseUrl: "http://d", reconcile }]
+  });
+  test("changing a target's reconcile mode is a settings change", () => {
+    assert.notEqual(settingsSignature(led("single")), settingsSignature(led("always")));
+  });
+  test("an unset reconcile signs identically to its resolved default", () => {
+    // simpleLed default is verify — unset and explicit-verify must match
+    const unset = { services: { meet: true }, targets: [{ id: "x", type: "simpleLed", enabled: true, baseUrl: "http://d" }] };
+    assert.equal(settingsSignature(unset), settingsSignature(led("verify")));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Diagnostics: humanized activity log
+// ---------------------------------------------------------------------------
+
+describe("diagnostics humanizer", () => {
+  test("modeLabel maps device modes to words", () => {
+    assert.equal(modeLabel(0), "off");
+    assert.equal(modeLabel(1), "on");
+    assert.equal(modeLabel(2), "breathing");
+    assert.equal(modeLabel(9), "9"); // unknown falls through
+  });
+
+  test("targetSeverity classifies per-target outcomes", () => {
+    assert.equal(targetSeverity({ ok: false }), "error");
+    assert.equal(targetSeverity({ action: "remediate", drift: true }), "warn");
+    assert.equal(targetSeverity({ noop: true }), "muted");
+    assert.equal(targetSeverity({ ok: true, action: "edge" }), "ok");
+  });
+
+  test("logSeverity is the worst of an entry's targets", () => {
+    assert.equal(logSeverity({ targets: [{ noop: true }, { ok: true }] }), "ok");
+    assert.equal(logSeverity({ targets: [{ ok: true }, { ok: false }] }), "error");
+    assert.equal(logSeverity({ targets: [{ ok: true }, { action: "remediate" }] }), "warn");
+    assert.equal(logSeverity({ kind: "worker", event: "started" }), "info");
+    assert.equal(logSeverity({ targets: [] }), "muted");
+  });
+
+  test("describeTargetLine renders plain English with latency and errors", () => {
+    assert.match(
+      describeTargetLine({ type: "iotHybrid", action: "remediate", actual: 2, via: "local", ms: 42 }).text,
+      /IoT sign drifted \(was breathing\) — corrected via local · 42 ms/
+    );
+    assert.match(
+      describeTargetLine({ type: "listener", ok: false, error: "timeout", ms: 3000 }).text,
+      /Listener failed — timeout · 3000 ms/
+    );
+    assert.match(
+      describeTargetLine({ type: "iotHybrid", action: "verify", noop: true, actual: 1 }).text,
+      /IoT sign already correct \(on\)/
+    );
+  });
+
+  test("describeLogEntry summarizes an edge and a reconcile", () => {
+    const edge = describeLogEntry({
+      kind: "edge", reason: "activated", to: "ON", service: "meet",
+      targets: [{ type: "listener", ok: true, ms: 20 }]
+    });
+    assert.equal(edge.severity, "ok");
+    assert.match(edge.headline, /State change · In meeting \(meet\)/);
+    assert.equal(edge.lines.length, 1);
+
+    const rec = describeLogEntry({
+      kind: "reconcile", to: "OFF",
+      targets: [{ type: "iotHybrid", action: "remediate", actual: 2, drift: true, ok: true }]
+    });
+    assert.equal(rec.severity, "warn");
+    assert.match(rec.headline, /Reconcile · No meeting/);
+    assert.equal(rec.reason, "alarm"); // defaulted for reconcile entries
+  });
+
+  test("describeLogEntry handles worker lifecycle markers", () => {
+    const d = describeLogEntry({ kind: "worker", event: "started", ts: 123 });
+    assert.equal(d.severity, "info");
+    assert.match(d.headline, /Service worker started/);
+    assert.deepEqual(d.lines, []);
   });
 });

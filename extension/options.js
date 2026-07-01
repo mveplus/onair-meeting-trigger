@@ -20,7 +20,10 @@ import {
   formatBuildBadge,
   BLANK_CHOICES,
   resolveAddChoice,
-  settingsSignature
+  settingsSignature,
+  reconcileModesFor,
+  resolveReconcile,
+  migrateReconcile
 } from "./shared.js";
 
 const DEFAULTS = {
@@ -469,17 +472,10 @@ function renderTargets(cfg) {
       `;
     } else if (t.type === "simpleLed") {
       body.innerHTML = `
-        <div class="row">
-          <div>
-            <label>Base URL
-              <input type="text" class="t_baseUrl" placeholder="http://192.168.1.50" value="${esc(t.baseUrl || "")}">
-            </label>
-            <div class="muted">Uses <code>/led/on</code>, <code>/led/off</code>, optional <code>/led/status</code>.</div>
-          </div>
-          <div>
-            <label style="margin-top:30px;"><input type="checkbox" class="t_verify" ${t.verifyStatus ? "checked":""}> Verify using <code>/led/status</code></label>
-          </div>
-        </div>
+        <label>Base URL
+          <input type="text" class="t_baseUrl" placeholder="http://192.168.1.50" value="${esc(t.baseUrl || "")}">
+        </label>
+        <div class="muted">Uses <code>/led/on</code>, <code>/led/off</code>, optional <code>/led/status</code>.</div>
       `;
     } else if (t.type === "iotHybrid") {
       const modeOpts = [[0, "off"], [1, "on"], [2, "breathing"]];
@@ -573,6 +569,10 @@ function renderTargets(cfg) {
       `;
     }
 
+    // Reconcile policy control (shared across target types). Appended
+    // after the type-specific body so every target exposes it.
+    body.insertAdjacentHTML("beforeend", reconcileSelectHtml(t));
+
     // Wire remove
     div.querySelector(".t_remove").addEventListener("click", () => {
       cfg.targets.splice(idx, 1);
@@ -586,6 +586,39 @@ function renderTargets(cfg) {
     wrap.appendChild(div);
   });
   refreshDirty();
+}
+
+const RECONCILE_LABELS = {
+  single: "Fire once when the meeting starts/ends",
+  verify: "Verify actual state & fix only if it drifted",
+  always: "Re-assert the state on every 1-min check"
+};
+
+function reconcileHint(type) {
+  if (type === "httpHook") return "Fires on the meeting edge only. Pick “Re-assert” only for idempotent devices — never for notifications.";
+  if (type === "simpleLed") return "“Verify” pings /led/status and re-sends on/off when reachable. “Re-assert” re-sends every minute regardless.";
+  if (type === "iotHybrid") return "“Verify” reads /api/status on the local device and re-sends only if it drifted. The cloud (Lambda) leg has no state readback yet — use “Re-assert” to keep it fresh.";
+  return "";
+}
+
+// Per-target reconcile <select>. Returns "" when the type supports only
+// one mode (e.g. listener/Ntfy is always fire-once) so there's nothing to
+// choose and no way to accidentally enable notification spam.
+function reconcileSelectHtml(t) {
+  const modes = reconcileModesFor(t.type);
+  if (modes.length <= 1) return "";
+  const cur = resolveReconcile(t);
+  const opts = modes
+    .map(m => `<option value="${m}" ${m === cur ? "selected" : ""}>${esc(RECONCILE_LABELS[m] || m)}</option>`)
+    .join("");
+  return `
+    <details class="advanced" style="margin-top:8px;" ${cur !== "single" ? "open" : ""}>
+      <summary>Reconcile behavior</summary>
+      <label>While a meeting is ongoing
+        <select class="t_reconcile">${opts}</select>
+      </label>
+      <div class="muted">${esc(reconcileHint(t.type))}</div>
+    </details>`;
 }
 
 function wireValidation(node, t) {
@@ -636,7 +669,7 @@ function buildTargetFromNode(node, t) {
     base.url = node.querySelector(".t_url")?.value.trim() || "";
   } else if (t.type === "simpleLed") {
     base.baseUrl = trimSlash(node.querySelector(".t_baseUrl")?.value.trim() || "");
-    base.verifyStatus = !!node.querySelector(".t_verify")?.checked;
+    delete base.verifyStatus; // superseded by the reconcile policy
   } else if (t.type === "iotHybrid") {
     base.localBase = trimSlash(node.querySelector(".t_localBase")?.value.trim() || "");
     base.localToken = node.querySelector(".t_localToken")?.value.trim() || "";
@@ -685,6 +718,11 @@ function buildTargetFromNode(node, t) {
 
     base.body = node.querySelector(".t_bodyText")?.value ?? "";
   }
+
+  // Reconcile policy (shared control). When the type offers only one mode
+  // the select isn't rendered, so keep whatever migrated onto the target.
+  const rec = node.querySelector(".t_reconcile")?.value;
+  base.reconcile = resolveReconcile({ type: t.type, reconcile: rec ?? base.reconcile });
 
   return base;
 }
@@ -944,14 +982,14 @@ function exportHooks() {
 
   const targets = sourceTargets.map(t => {
     if (t.type === "listener") {
-      return { type: "listener", url: t.url || "", enabled: t.enabled !== false };
+      return { type: "listener", url: t.url || "", enabled: t.enabled !== false, reconcile: resolveReconcile(t) };
     }
     if (t.type === "simpleLed") {
       return {
         type: "simpleLed",
         baseUrl: t.baseUrl || "",
-        verifyStatus: !!t.verifyStatus,
-        enabled: t.enabled !== false
+        enabled: t.enabled !== false,
+        reconcile: resolveReconcile(t)
       };
     }
     if (t.type === "iotHybrid") {
@@ -965,7 +1003,8 @@ function exportHooks() {
         modeOn: clampMode(t.modeOn, 1),
         modeOff: clampMode(t.modeOff, 0),
         localTimeoutMs: clampLocalTimeoutMs(t.localTimeoutMs, 1500),
-        enabled: t.enabled !== false
+        enabled: t.enabled !== false,
+        reconcile: resolveReconcile(t)
       };
     }
     return {
@@ -980,7 +1019,8 @@ function exportHooks() {
       statusCodes: normalizeStatusCodes(t.statusCodes),
       matchOn: t.matchOn || "",
       matchOff: t.matchOff || "",
-      enabled: t.enabled !== false
+      enabled: t.enabled !== false,
+      reconcile: resolveReconcile(t)
     };
   });
 
@@ -1044,7 +1084,7 @@ async function importHooksFromFile(file) {
       customServices = normalizeCustomServices(parsed.customServices, newId);
     }
 
-    const normalizedTargets = targets.map(normalizeTarget).filter(Boolean);
+    const normalizedTargets = targets.map(normalizeTarget).filter(Boolean).map(migrateReconcile);
     if (normalizedTargets.length === 0 && customServices.length === 0 && !importedSettings) {
       showStatus("No valid settings found", false);
       return;
@@ -1314,5 +1354,23 @@ document.querySelectorAll(".timeout-pill").forEach(btn => {
   });
 });
 
+// ---- Diagnostics ------------------------------------------------------
+// The full live log lives in diagnostics.html (opened in a tab or as the
+// DevTools panel) so it doesn't bloat the settings page. Here we only
+// expose the debug-logging toggle and a button to open it.
+
+async function initDiagnostics() {
+  const { debugLogs = false } = await chrome.storage.local.get({ debugLogs: false });
+  const box = $("debug_logs");
+  if (box) {
+    box.checked = !!debugLogs;
+    box.addEventListener("change", () => chrome.storage.local.set({ debugLogs: !!box.checked }));
+  }
+  $("open_diagnostics")?.addEventListener("click", () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("diagnostics.html") });
+  });
+}
+
 load();
 showBuildBadge();
+initDiagnostics();

@@ -45,6 +45,31 @@ docs/, resources/  Documentation and store assets
 - **MV3 reliability:** a 1-minute `chrome.alarms` reconcile heartbeat
   (`alarms` permission) re-derives state so a suspended worker can't leave the
   sign stale; the 400 ms `setTimeout` debounce is kept for sub-second coalescing.
+- **Persisted state (no duplicate notifications):** the last-applied
+  `{state,service,url}` is written to `chrome.storage.session` (`saveCurrent`/
+  `loadCurrent`) and hydrated at the top of `tick()`. Without it the module
+  `current` reset to OFF on every cold start, so the heartbeat saw a phantom
+  OFF→ON edge and re-fired every target — that was the duplicate "in a meeting"
+  push bug. Edges fire all targets once; the heartbeat only re-fires per the
+  target's reconcile policy.
+- **Per-target reconcile policy** (`shared.js`: `RECONCILE_MODES`,
+  `reconcileModesFor`, `resolveReconcile`, `migrateReconcile`): `single` (edge
+  only — the only mode for listener/Ntfy), `verify` (read actual state, re-fire
+  on drift — iotHybrid via `/api/status` + `parseDeviceMode`/`reconcileDrift`,
+  simpleLed via `/led/status` reachability), `always` (blind re-assert; the only
+  remediation for the cloud/Lambda leg, which has no readback). `reconcilePass()`
+  runs only on `reason === "alarm"`. Legacy `simpleLed.verifyStatus` migrates to
+  `reconcile`. Cloud `verify` awaits a future IoT-shadow/state-query (firmware +
+  Lambda).
+- **Diagnostics:** an opt-in ring buffer (`activityLog` in `storage.local`, cap
+  200, gated by the `debugLogs` toggle) records edge/reconcile/worker events with
+  per-target outcomes (latency, error text, drift). The viewer is `diagnostics.html`
+  + `diagnostics.js` — surfaced both as a DevTools panel (`devtools.js` →
+  `devtools_page`) and via Options → "Open diagnostics" (a tab); it reads the log
+  straight from `storage.local` and live-updates via `storage.onChanged` (no
+  worker round-trip). Humanizing is pure/tested in `shared.js`
+  (`describeLogEntry`, `logSeverity`, `describeTargetLine`, `modeLabel`). The
+  options page keeps only the toggle + open button, so settings stays uncluttered.
 - **Popup is status-first:** the worker broadcasts `STATE_CHANGED` and answers
   `GET_STATE` with `{ state, service, pause }`; the popup renders a big
   color-coded status card and a quick **Pause** control. Pause lives in
