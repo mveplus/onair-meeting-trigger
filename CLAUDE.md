@@ -55,12 +55,14 @@ docs/, resources/  Documentation and store assets
 - **Per-target reconcile policy** (`shared.js`: `RECONCILE_MODES`,
   `reconcileModesFor`, `resolveReconcile`, `migrateReconcile`): `single` (edge
   only — the only mode for listener/Ntfy), `verify` (read actual state, re-fire
-  on drift — iotHybrid via `/api/status` + `parseDeviceMode`/`reconcileDrift`,
-  simpleLed via `/led/status` reachability), `always` (blind re-assert; the only
-  remediation for the cloud/Lambda leg, which has no readback). `reconcilePass()`
-  runs only on `reason === "alarm"`. Legacy `simpleLed.verifyStatus` migrates to
-  `reconcile`. Cloud `verify` awaits a future IoT-shadow/state-query (firmware +
-  Lambda).
+  on drift), `always` (blind re-assert). `verify` for iotHybrid reads
+  `/api/status` on the LAN (`readIotLocalMode` + `parseDeviceMode`) and falls
+  back to the cloud bridge's shadow read (`readIotCloudMode` → `GET ?thing=…` →
+  `parseCloudStateMode`) when off-network; simpleLed uses `/led/status`
+  reachability; drift via `reconcileDrift`. `reconcilePass()` runs only on
+  `reason === "alarm"`. Legacy `simpleLed.verifyStatus` migrates to `reconcile`.
+  (Cloud readback is served by the firmware Device Shadow + Lambda GET in the
+  `onair-led-sign-firmware` repo.)
 - **Diagnostics:** an opt-in ring buffer (`activityLog` in `storage.local`, cap
   200, gated by the `debugLogs` toggle) records edge/reconcile/worker events with
   per-target outcomes (latency, error text, drift). The viewer is `diagnostics.html`

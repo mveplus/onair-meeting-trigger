@@ -121,12 +121,14 @@ how that heartbeat treats it (under **Reconcile behavior** on the target):
 - **Verify state & remediate** (`verify`) — on each heartbeat the
   extension reads the device's *actual* state and re-sends the command
   **only if it drifted**. Available where a readback exists: the LED sign
-  target (`/led/status` reachability) and the IoT target's local leg
-  (`/api/status`, which reports `output_mode`). No drift → no request.
+  target (`/led/status` reachability) and the IoT target — its LAN leg
+  (`/api/status`) with an automatic fallback to the **cloud bridge's
+  shadow read** (`GET ?thing=…`) when off-network, so verify works
+  end-to-end even away from home. No drift → no request.
 - **Re-assert every minute** (`always`) — blindly re-sends the desired
   state each heartbeat. Harmless for idempotent devices; not offered for
-  notifications. Use this for the IoT **cloud/Lambda** leg, which has no
-  state readback yet, when you want it kept fresh regardless.
+  notifications. A simpler alternative to `verify` when you'd rather not
+  read state back at all.
 
 Defaults: notifications → *fire once*; LED / IoT → *verify*. The old
 "Verify using `/led/status`" checkbox is migrated automatically to the
