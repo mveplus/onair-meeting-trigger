@@ -597,7 +597,7 @@ const RECONCILE_LABELS = {
 function reconcileHint(type) {
   if (type === "httpHook") return "Fires on the meeting edge only. Pick “Re-assert” only for idempotent devices — never for notifications.";
   if (type === "simpleLed") return "“Verify” pings /led/status and re-sends on/off when reachable. “Re-assert” re-sends every minute regardless.";
-  if (type === "iotHybrid") return "“Verify” reads /api/status on the local device and re-sends only if it drifted. The cloud (Lambda) leg has no state readback yet — use “Re-assert” to keep it fresh.";
+  if (type === "iotHybrid") return "“Verify” reads the device’s actual state and re-sends only if it drifted — via /api/status on the LAN, falling back to the cloud bridge’s shadow read when off-network. “Re-assert” re-sends every minute regardless.";
   return "";
 }
 

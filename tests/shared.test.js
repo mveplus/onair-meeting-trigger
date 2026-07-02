@@ -41,6 +41,7 @@ import {
   migrateReconcile,
   parseDeviceMode,
   reconcileDrift,
+  parseCloudStateMode,
   DEFAULT_RECONCILE,
   modeLabel,
   targetSeverity,
@@ -671,5 +672,30 @@ describe("diagnostics humanizer", () => {
     assert.equal(d.severity, "info");
     assert.match(d.headline, /Service worker started/);
     assert.deepEqual(d.lines, []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cloud state readback (iotHybrid cloud-leg verify — Phase 3)
+// ---------------------------------------------------------------------------
+
+describe("parseCloudStateMode", () => {
+  test("reads the bare mode from the Lambda response", () => {
+    assert.equal(parseCloudStateMode({ ok: true, thing: "x", mode: 2 }), 2);
+    assert.equal(parseCloudStateMode({ ok: true, mode: 0 }), 0);
+    assert.equal(parseCloudStateMode('{"ok":true,"mode":1}'), 1); // JSON string
+  });
+
+  test("falls back to the reported doc when mode is absent", () => {
+    assert.equal(parseCloudStateMode({ ok: true, reported: { output_mode: "breathing" } }), 2);
+    assert.equal(parseCloudStateMode({ ok: true, reported: { state: true } }), 1);
+  });
+
+  test("returns null for errors, junk, or out-of-range modes", () => {
+    assert.equal(parseCloudStateMode({ ok: false, error: "no shadow" }), null);
+    assert.equal(parseCloudStateMode({ ok: true, mode: 9 }), null);
+    assert.equal(parseCloudStateMode("not json"), null);
+    assert.equal(parseCloudStateMode(null), null);
+    assert.equal(parseCloudStateMode({ ok: true }), null); // no mode, no reported
   });
 });

@@ -202,6 +202,26 @@ export function reconcileDrift(desiredMode, actualMode) {
   return clampMode(actualMode, -1) !== clampMode(desiredMode, -1);
 }
 
+// Parse the cloud bridge's state-read response into a normalized mode
+// (0|1|2), or null when it isn't determinable. The Lambda GET returns
+// { ok, thing, mode, reported, ts } read from the device's AWS IoT
+// Device Shadow; we prefer the bare `mode`, falling back to the reported
+// doc — so local (/api/status) and cloud verify agree on the mapping.
+export function parseCloudStateMode(payload) {
+  let j = payload;
+  if (typeof payload === "string") {
+    try { j = JSON.parse(payload); } catch { return null; }
+  }
+  if (!j || typeof j !== "object" || j.ok === false) return null;
+  if (j.mode === undefined || j.mode === null) {
+    // `reported` mirrors the /api/status body shape (output_mode / state),
+    // which is exactly what parseDeviceMode consumes.
+    return parseDeviceMode(j.reported || null);
+  }
+  const m = Number(j.mode);
+  return VALID_MODES.includes(m) ? m : null;
+}
+
 // Header keys we treat as credentials: kept out of synced storage and
 // redacted from exported settings (see extractSecrets / redactSecrets).
 export const SECRET_HEADER_KEYS = ["authorization", "x-api-token"];

@@ -23,7 +23,8 @@ import {
   resolveReconcile,
   migrateReconcile,
   parseDeviceMode,
-  reconcileDrift
+  reconcileDrift,
+  parseCloudStateMode
 } from "./shared.js";
 
 const LEGACY_DEFAULTS = {
@@ -460,12 +461,19 @@ async function runIotHybridTarget(target, vars, timeoutSec) {
   return { ok: res.ok, via: "cloud", status: res.status, error: res.ok ? undefined : res.errorMsg };
 }
 
-// Read the device's actual mode from the firmware's /api/status on the
-// local network. Returns 0|1|2 or null when we can't tell (no localBase,
-// unreachable, or an unparseable body). The cloud leg has no readback
-// yet (the Lambda is publish-only), so `verify` can only remediate over
-// the local path — see reconcileTarget.
-async function readIotHybridMode(target) {
+// Read the device's actual mode for a `verify` reconcile. Tries the fast
+// LAN path (/api/status) first; if the device is unreachable there, falls
+// back to the cloud bridge's shadow-read so verify still works off-network
+// (laptop asleep at home, on a train, guest wifi, …). Returns 0|1|2 or
+// null when neither path can tell.
+async function readIotHybridMode(target, timeoutSec) {
+  const local = await readIotLocalMode(target);
+  if (local !== null) return local;
+  return readIotCloudMode(target, timeoutSec);
+}
+
+// Local readback: GET the firmware's /api/status on the LAN.
+async function readIotLocalMode(target) {
   if (!target?.localBase) return null;
   const localTimeoutMs = clampLocalTimeoutMs(target.localTimeoutMs, 1500);
   const ac = new AbortController();
@@ -485,6 +493,20 @@ async function readIotHybridMode(target) {
   } finally {
     clearTimeout(to);
   }
+}
+
+// Cloud readback: the bridge Lambda answers GET ?thing=… by reading the
+// device's AWS IoT Device Shadow (last reported state). Same endpoint +
+// bearer token as the command path, just a GET instead of a POST.
+async function readIotCloudMode(target, timeoutSec) {
+  if (!target?.cloudBase || !target?.thing) return null;
+  const headers = new Headers();
+  if (target.cloudToken) headers.set("Authorization", `Bearer ${target.cloudToken}`);
+  const url = `${trimSlash(target.cloudBase)}/?thing=${encodeURIComponent(target.thing)}`;
+  const res = await callUrl(url, clampTimeoutSec(timeoutSec, 3), { method: "GET", headers, readBody: true })
+    .catch(() => ({ ok: false, text: "" }));
+  if (!res.ok) return null;
+  return parseCloudStateMode(res.text);
 }
 
 function desiredMode(target, state) {
@@ -548,7 +570,7 @@ async function reconcileTarget(t, vars, timeoutSec) {
 
   // mode === "verify"
   if (t.type === "iotHybrid") {
-    const actual = await readIotHybridMode(t);
+    const actual = await readIotHybridMode(t, timeoutSec);
     const drift = reconcileDrift(desiredMode(t, vars.state), actual);
     if (drift === true) {
       const r = await dispatchTarget(t, vars, timeoutSec);
