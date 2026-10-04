@@ -128,6 +128,16 @@ You can use these in HTTP Hook URLs or bodies:
   the host is shared but the meeting ID never leaves the browser. Enable the
   setting to send the **full** URL including the meeting ID.
 - `{ts}` → timestamp (unix ms)
+- `{url_raw}` → same as `{url}` but never escaped (see below). Only use it if
+  you really need the unencoded value.
+
+**Escaping.** Substituted values are escaped for where they land, so a
+crafted meeting link can't inject extra parameters or JSON fields:
+
+- in **URLs** (hook ON/OFF URLs, listener URLs) values are URL-encoded
+  (`https://meet.google.com` → `https%3A%2F%2Fmeet.google.com`);
+- in **bodies that start with `{` or `[`** values are JSON-string escaped;
+- in any other body (plain text / form) values are inserted as-is.
 
 ## Adding your own templates (developers)
 

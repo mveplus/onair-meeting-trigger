@@ -107,6 +107,7 @@ const SEVERITY_RANK = { info: 0, muted: 1, ok: 2, warn: 3, error: 4 };
 // Severity of a single target outcome within a log entry.
 export function targetSeverity(t) {
   if (!t) return "muted";
+  if (t.superseded) return "muted"; // cancelled by a newer edge — expected
   if (t.ok === false) return "error";
   if (t.action === "remediate" || t.drift === true) return "warn";
   if (t.noop) return "muted";
@@ -130,7 +131,9 @@ export function describeTargetLine(t) {
   const name = friendlyTargetType(t?.type);
   const severity = targetSeverity(t);
   let text;
-  if (t?.ok === false) {
+  if (t?.superseded) {
+    text = `${name} cancelled — superseded by a newer change`;
+  } else if (t?.ok === false) {
     text = `${name} failed`;
     if (t.status) text += ` (HTTP ${t.status})`;
     if (t.error) text += ` — ${t.error}`;
@@ -258,12 +261,37 @@ export function backoffMs(attempt) {
   return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** attempt));
 }
 
-export function applyTemplate(str, vars = {}) {
+export const TEMPLATE_TOKENS = ["{state}", "{service}", "{url}", "{url_raw}", "{ts}"];
+
+// Escape a substituted value for the context it lands in (S1):
+//   "url"  — encodeURIComponent, so a meeting link like `…?a=1&state=OFF`
+//            can't inject extra query params into the user's hook URL
+//   "json" — JSON string escaping, so quotes can't break out of a body
+//   "none" — raw (plain-text bodies, legacy callers)
+function encodeTemplateValue(v, encode) {
+  const s = String(v ?? "");
+  if (encode === "url") return encodeURIComponent(s);
+  if (encode === "json") return JSON.stringify(s).slice(1, -1);
+  return s;
+}
+
+// `{url_raw}` is the escape hatch: always substituted verbatim, for users
+// who deliberately want the unencoded meeting URL in a template.
+export function applyTemplate(str, vars = {}, encode = "none") {
+  const enc = v => encodeTemplateValue(v, encode);
   return String(str ?? "")
-    .replaceAll("{state}", vars.state ?? "")
-    .replaceAll("{service}", vars.service ?? "")
-    .replaceAll("{url}", vars.url ?? "")
-    .replaceAll("{ts}", String(vars.ts ?? ""));
+    .replaceAll("{state}", enc(vars.state))
+    .replaceAll("{service}", enc(vars.service))
+    .replaceAll("{url_raw}", String(vars.url ?? ""))
+    .replaceAll("{url}", enc(vars.url))
+    .replaceAll("{ts}", enc(vars.ts));
+}
+
+// Pick the escaping for a request body template: JSON-looking bodies get
+// JSON escaping, anything else (form / plain text) is left raw.
+export function bodyEncodingFor(bodyTpl) {
+  const s = String(bodyTpl ?? "").trim();
+  return s.startsWith("{") || s.startsWith("[") ? "json" : "none";
 }
 
 // ---- service matching --------------------------------------------------
@@ -337,8 +365,8 @@ function defaultNewId(prefix = "t") {
 export function buildListenerUrl(rawUrl, vars = {}) {
   const url = String(rawUrl || "").trim();
   if (!url) return null;
-  const hasToken = ["{state}", "{service}", "{url}", "{ts}"].some(tok => url.includes(tok));
-  if (hasToken) return applyTemplate(url, vars);
+  const hasToken = TEMPLATE_TOKENS.some(tok => url.includes(tok));
+  if (hasToken) return applyTemplate(url, vars, "url");
   let u;
   try { u = new URL(url); } catch { return null; }
   u.searchParams.set("state", vars.state ?? "");
@@ -387,19 +415,47 @@ export function httpHookSuccess(target, state, response) {
 
 // ---- endpoint security warnings (Fix 2) -------------------------------
 
+// S2: IP ranges are only checked against real IP literals — a prefix test
+// on the hostname string let `10.evil.com` / `192.168.attacker.net` pass
+// as LAN and silenced the cleartext-token warning.
+function isPrivateIPv4(host) {
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return null; // not an IPv4 literal
+  const [a, b] = [+m[1], +m[2]];
+  return a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254) ||            // link-local
+    (a === 100 && b >= 64 && b <= 127);    // CGNAT / Tailscale
+}
+
+function isPrivateIPv6(host) {
+  if (!host.startsWith("[") || !host.endsWith("]")) return null; // not IPv6
+  const h = host.slice(1, -1);
+  if (h === "::1") return true;
+  // IPv4-mapped; the URL parser normalizes it to hex (::ffff:c0a8:101).
+  const mapped = h.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mapped) {
+    const hi = parseInt(mapped[1], 16), lo = parseInt(mapped[2], 16);
+    return isPrivateIPv4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`) === true;
+  }
+  return /^f[cd][0-9a-f]{0,2}:/.test(h) || /^fe[89ab][0-9a-f]?:/.test(h); // ULA, link-local
+}
+
 export function isPrivateHost(url) {
   let host;
   try { host = new URL(url).hostname; } catch { return false; }
   if (!host) return false;
   host = host.toLowerCase();
-  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".lan")) return true;
-  if (!host.includes(".")) return true; // bare hostname, assume LAN
-  if (host === "127.0.0.1" || host.startsWith("127.")) return true;
-  if (host.startsWith("10.")) return true;
-  if (host.startsWith("192.168.")) return true;
-  const m = host.match(/^172\.(\d+)\./);
-  if (m) { const o = +m[1]; if (o >= 16 && o <= 31) return true; }
-  return false;
+  const v6 = isPrivateIPv6(host);
+  if (v6 !== null) return v6;
+  const v4 = isPrivateIPv4(host);
+  if (v4 !== null) return v4;
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (host.endsWith(".local") || host.endsWith(".lan") ||
+      host.endsWith(".home.arpa") || host.endsWith(".internal")) return true;
+  return !host.includes("."); // bare hostname, assume LAN
 }
 
 function isCleartext(url) {
@@ -433,6 +489,21 @@ export function endpointSecurityWarnings(target) {
 
 function hasText(s) {
   return typeof s === "string" && s.trim() !== "";
+}
+
+// S3: fetch strips only `Authorization` on a cross-origin redirect, so a
+// custom credential header (X-API-Token, …) would follow a redirect to
+// whatever host the endpoint points at. Refuse redirects on any request
+// that carries credentials; credential-free hooks keep following them.
+export function redirectPolicyFor(target) {
+  if (target?.type === "iotHybrid") return "error"; // always token-bearing APIs
+  if (target?.type === "httpHook") {
+    const hasHeaderCred = (target.headers || [])
+      .some(h => SECRET_HEADER_KEYS.includes(String(h?.key || "").toLowerCase()) && hasText(h?.value));
+    const hasBasic = !!(target.basicAuth && (target.basicAuth.user || target.basicAuth.pass));
+    return hasHeaderCred || hasBasic ? "error" : "follow";
+  }
+  return "follow";
 }
 
 // ---- secret splitting (Fix 1) -----------------------------------------
@@ -664,4 +735,13 @@ export function settingsSignature(cfg) {
     targets: (c.targets || []).map(canonTarget)
   };
   return JSON.stringify(canon);
+}
+
+// ---- tab event filtering (P1) -------------------------------------------
+
+// tabs.onUpdated fires for every title/favicon/audible/loading change on
+// every tab. Only a URL change (incl. SPA navigation) or a finished load
+// can change which meeting service matches.
+export function isRelevantTabUpdate(changeInfo) {
+  return changeInfo?.url !== undefined || changeInfo?.status === "complete";
 }

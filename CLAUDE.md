@@ -90,6 +90,24 @@ docs/, resources/  Documentation and store assets
   installs render nothing). Run `scripts/gen-build-info.sh` after switching
   branches to refresh it.
 
+- **Edge cancellation + caching (background.js):** each meeting edge owns an
+  `AbortController` (`edgeAbort`); a new edge aborts the previous edge's
+  in-flight requests and retries so an older ON can't land after a newer OFF
+  (results tagged `superseded`). Config is cached in memory (`cfgCache`,
+  invalidated by `storage.onChanged` + `CONFIG_UPDATED`); `current` hydrates
+  once per worker (`ensureCurrent`) and is only persisted when it changes.
+  `tabs.onUpdated` is filtered by `isRelevantTabUpdate`.
+- **Template escaping:** `applyTemplate(str, vars, encode)` — URLs use `"url"`
+  (encodeURIComponent), JSON bodies `"json"` (`bodyEncodingFor`); `{url_raw}`
+  is the unescaped escape hatch. Credentialed requests use
+  `redirectPolicyFor` → `redirect: "error"`.
+
+## Open review backlog
+
+`docs/REVIEW-BACKLOG.md` tracks the 2026-10 security / speed / UI review
+(IDs S1–S9, R1, P1–P8, U1–U13). Tick items there as they land; reference the
+ID in commit messages.
+
 ## Tests
 
 ```bash

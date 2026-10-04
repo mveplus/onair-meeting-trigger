@@ -3,6 +3,8 @@ import {
   DEFAULT_STATUS_CODES,
   trimSlash,
   applyTemplate,
+  bodyEncodingFor,
+  redirectPolicyFor,
   backoffMs,
   normalizePrefixes,
   normalizeCustomServices,
@@ -467,7 +469,7 @@ function renderTargets(cfg) {
         <label>URL
           <input type="text" class="t_url" placeholder="http://127.0.0.1:8765/event?state={state}&service={service}&url={url}&ts={ts}" value="${esc(t.url || "")}">
         </label>
-        <div class="muted">You can use tokens: <code>{state}</code> <code>{service}</code> <code>{url}</code> <code>{ts}</code></div>
+        <div class="muted">You can use tokens: <code>{state}</code> <code>{service}</code> <code>{url}</code> <code>{ts}</code> (values are URL-encoded)</div>
         <div class="muted" style="margin-top:8px;">If you don&#39;t use tokens, the extension will append <code>?state=..&amp;service=..&amp;url=..&amp;ts=..</code> automatically (backward compatible).</div>
       `;
     } else if (t.type === "simpleLed") {
@@ -1181,7 +1183,7 @@ async function testSingleTarget(t, vars, timeoutMs) {
         const headers = new Headers();
         if (t.localToken) headers.set("X-API-Token", t.localToken);
         const r = await fetch(`${trimSlash(t.localBase)}/api/set?state=${mode}`,
-          { method: "GET", headers, cache: "no-store", signal: ac.signal });
+          { method: "GET", headers, cache: "no-store", redirect: "error", signal: ac.signal });
         clearTimeout(to);
         if (r.ok) return true;
       } catch (_) { /* fall through to cloud */ }
@@ -1192,7 +1194,7 @@ async function testSingleTarget(t, vars, timeoutMs) {
     const cloudHeaders = new Headers();
     if (t.cloudToken) cloudHeaders.set("Authorization", `Bearer ${t.cloudToken}`);
     const cloudUrl = `${trimSlash(t.cloudBase)}/?thing=${encodeURIComponent(t.thing)}&mode=${mode}`;
-    return fetchWithTimeout(cloudUrl, { method: "POST", headers: cloudHeaders }, timeoutMs);
+    return fetchWithTimeout(cloudUrl, { method: "POST", headers: cloudHeaders, redirect: "error" }, timeoutMs);
   }
   return testHttpHookTarget(t, vars, timeoutMs, vars.state);
 }
@@ -1200,7 +1202,8 @@ async function testSingleTarget(t, vars, timeoutMs) {
 async function testHttpHookTarget(t, vars, timeoutMs, state) {
   const urlTpl = state === "ON" ? t.onUrl : t.offUrl;
   if (!urlTpl) return false;
-  const url = applyTemplate(urlTpl, vars);
+  // S1: same context-aware escaping as the live dispatch.
+  const url = applyTemplate(urlTpl, vars, "url");
   const method = (t.method || "GET").toUpperCase();
 
   const headers = new Headers();
@@ -1210,9 +1213,12 @@ async function testHttpHookTarget(t, vars, timeoutMs, state) {
     headers.set("Authorization", "Basic " + btoaSafe(`${t.basicAuth.user||""}:${t.basicAuth.pass||""}`));
   }
 
-  const body = (method === "GET" || method === "HEAD") ? undefined : (applyTemplate(t.body || "", vars) || undefined);
+  const body = (method === "GET" || method === "HEAD")
+    ? undefined
+    : (applyTemplate(t.body || "", vars, bodyEncodingFor(t.body)) || undefined);
   // Fix 4: same success rule the live background dispatch uses.
-  const res = await fetchWithTimeoutResult(url, { method, headers, body }, timeoutMs);
+  // S3: refuse redirects when the request carries credentials.
+  const res = await fetchWithTimeoutResult(url, { method, headers, body, redirect: redirectPolicyFor(t) }, timeoutMs);
   return httpHookSuccess(t, state, res);
 }
 

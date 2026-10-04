@@ -47,7 +47,10 @@ import {
   targetSeverity,
   logSeverity,
   describeTargetLine,
-  describeLogEntry
+  describeLogEntry,
+  bodyEncodingFor,
+  redirectPolicyFor,
+  isRelevantTabUpdate
 } from "../extension/shared.js";
 
 // ---------------------------------------------------------------------------
@@ -697,5 +700,108 @@ describe("parseCloudStateMode", () => {
     assert.equal(parseCloudStateMode("not json"), null);
     assert.equal(parseCloudStateMode(null), null);
     assert.equal(parseCloudStateMode({ ok: true }), null); // no mode, no reported
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review backlog fixes (docs/REVIEW-BACKLOG.md)
+// ---------------------------------------------------------------------------
+
+describe("S1: context-aware template escaping", () => {
+  const evil = { state: "ON", service: "meet", url: "https://meet.google.com/abc?a=1&state=OFF", ts: 1 };
+
+  test("url mode encodes values so params can't be injected", () => {
+    const out = applyTemplate("http://h/x?u={url}&state={state}", evil, "url");
+    assert.equal(out, "http://h/x?u=https%3A%2F%2Fmeet.google.com%2Fabc%3Fa%3D1%26state%3DOFF&state=ON");
+    assert.equal(new URL(out).searchParams.getAll("state").join(","), "ON");
+  });
+
+  test("json mode escapes quotes so fields can't be injected", () => {
+    const vars = { ...evil, service: 'x","admin":true,"y":"' };
+    const out = applyTemplate('{"svc":"{service}"}', vars, "json");
+    assert.deepEqual(JSON.parse(out), { svc: 'x","admin":true,"y":"' });
+  });
+
+  test("{url_raw} is never escaped; default mode stays raw", () => {
+    assert.equal(applyTemplate("u={url_raw}", evil, "url"), `u=${evil.url}`);
+    assert.equal(applyTemplate("u={url}", evil), `u=${evil.url}`);
+  });
+
+  test("buildListenerUrl encodes token values", () => {
+    const out = buildListenerUrl("http://h/e?s={state}&u={url}", evil);
+    assert.equal(new URL(out).searchParams.get("u"), evil.url);
+    assert.equal(new URL(out).searchParams.getAll("state").length, 0);
+  });
+
+  test("bodyEncodingFor picks json only for JSON-looking bodies", () => {
+    assert.equal(bodyEncodingFor(' {"a":1}'), "json");
+    assert.equal(bodyEncodingFor("[1]"), "json");
+    assert.equal(bodyEncodingFor("state={state}"), "none");
+    assert.equal(bodyEncodingFor(undefined), "none");
+  });
+});
+
+describe("S2: isPrivateHost only trusts real IP literals", () => {
+  test("look-alike hostnames are public", () => {
+    for (const u of ["http://10.evil.com/", "http://192.168.attacker.net/", "http://127.0.0.1.nip.io/", "http://172.16.x.io/"]) {
+      assert.equal(isPrivateHost(u), false, u);
+    }
+  });
+
+  test("private IPv4/IPv6 literals and LAN names are private", () => {
+    for (const u of ["http://169.254.1.1/", "http://100.100.1.1/", "http://[::1]/", "http://[fd00::1]/",
+      "http://[fe80::1]/", "http://[::ffff:192.168.1.1]/", "http://router.home.arpa/", "http://x.localhost/"]) {
+      assert.equal(isPrivateHost(u), true, u);
+    }
+  });
+
+  test("public IPv6 and CGNAT edge are public", () => {
+    for (const u of ["http://[2001:db8::1]/", "http://[::ffff:8.8.8.8]/", "http://100.128.0.1/"]) {
+      assert.equal(isPrivateHost(u), false, u);
+    }
+  });
+
+  test("the cleartext-token warning now fires for a look-alike host", () => {
+    const t = { type: "iotHybrid", cloudBase: "http://10.evil.com", cloudToken: "secret" };
+    assert.equal(endpointSecurityWarnings(t).length, 1);
+  });
+});
+
+describe("S3: redirect policy for credentialed requests", () => {
+  test("iotHybrid never follows redirects", () => {
+    assert.equal(redirectPolicyFor({ type: "iotHybrid" }), "error");
+  });
+
+  test("httpHook refuses redirects only when it carries credentials", () => {
+    assert.equal(redirectPolicyFor({ type: "httpHook", headers: [] }), "follow");
+    assert.equal(redirectPolicyFor({ type: "httpHook", headers: [{ key: "X-API-Token", value: "t" }] }), "error");
+    assert.equal(redirectPolicyFor({ type: "httpHook", headers: [{ key: "Authorization", value: "" }] }), "follow");
+    assert.equal(redirectPolicyFor({ type: "httpHook", basicAuth: { user: "u", pass: "" } }), "error");
+  });
+
+  test("listener / simpleLed follow redirects", () => {
+    assert.equal(redirectPolicyFor({ type: "listener" }), "follow");
+    assert.equal(redirectPolicyFor({ type: "simpleLed" }), "follow");
+  });
+});
+
+describe("R1: superseded requests render as expected, not as failures", () => {
+  test("superseded target is muted with a plain-English line", () => {
+    const t = { type: "simpleLed", ok: false, superseded: true, ms: 12 };
+    assert.equal(targetSeverity(t), "muted");
+    assert.equal(describeTargetLine(t).text, "LED sign cancelled — superseded by a newer change · 12 ms");
+    assert.equal(logSeverity({ kind: "edge", targets: [t] }), "muted");
+  });
+});
+
+describe("P1: tab update filtering", () => {
+  test("only URL changes and finished loads are relevant", () => {
+    assert.equal(isRelevantTabUpdate({ url: "https://meet.google.com/x" }), true);
+    assert.equal(isRelevantTabUpdate({ status: "complete" }), true);
+    assert.equal(isRelevantTabUpdate({ status: "loading" }), false);
+    assert.equal(isRelevantTabUpdate({ title: "Meet" }), false);
+    assert.equal(isRelevantTabUpdate({ favIconUrl: "x" }), false);
+    assert.equal(isRelevantTabUpdate({ audible: true }), false);
+    assert.equal(isRelevantTabUpdate(undefined), false);
   });
 });
