@@ -27,7 +27,8 @@ import {
   parseCloudStateMode,
   bodyEncodingFor,
   redirectPolicyFor,
-  isRelevantTabUpdate
+  isRelevantTabUpdate,
+  serviceMatchPatterns
 } from "./shared.js";
 
 const LEGACY_DEFAULTS = {
@@ -169,16 +170,25 @@ async function commitCurrent(next) {
 const LOG_KEY = "activityLog";
 const LOG_MAX = 200;
 
-async function logActivity(entry) {
-  if (!debugEnabled) return;
-  try {
-    const { [LOG_KEY]: log = [] } = await chrome.storage.local.get({ [LOG_KEY]: [] });
-    log.push({ ts: Date.now(), ...entry });
-    const trimmed = log.length > LOG_MAX ? log.slice(log.length - LOG_MAX) : log;
-    await chrome.storage.local.set({ [LOG_KEY]: trimmed });
-  } catch {
-    // best effort
-  }
+// P8: writes are serialized through a promise chain — concurrent
+// read-modify-write cycles (edge + worker-start + reconcile) used to
+// overwrite each other and drop entries.
+let logChain = Promise.resolve();
+
+function logActivity(entry) {
+  if (!debugEnabled) return Promise.resolve();
+  const record = { ts: Date.now(), ...entry };
+  logChain = logChain.then(async () => {
+    try {
+      const { [LOG_KEY]: log = [] } = await chrome.storage.local.get({ [LOG_KEY]: [] });
+      log.push(record);
+      const trimmed = log.length > LOG_MAX ? log.slice(log.length - LOG_MAX) : log;
+      await chrome.storage.local.set({ [LOG_KEY]: trimmed });
+    } catch {
+      // best effort
+    }
+  });
+  return logChain;
 }
 
 function newId(prefix = "t") {
@@ -289,19 +299,22 @@ async function loadConfig() {
     chrome.storage.sync.get({ config: DEFAULTS }),
     chrome.storage.local.get({ secrets: {} })
   ]);
-  let cfg = migrateConfig(config);
+  const migrated = migrateConfig(config);
+  let cfg = migrated;
   // Fix 1: credentials live in storage.local (not synced to the Google
   // account). Merge them back onto the synced, sanitized config.
   cfg = applySecrets(cfg, secrets);
 
   // Persist migrated config once so the options UI sees it — and move
-  // any credentials that were sitting in the synced blob (pre-update
-  // installs) out into storage.local.
-  if (!config?.targets && cfg.targets) {
-    const { config: sanitized, secrets: migratedSecrets } = extractSecrets(cfg);
+  // any credentials still sitting in the synced blob (pre-update installs,
+  // or URL/header secrets that S4 newly recognizes) out into storage.local.
+  // Once rewritten the synced blob is clean, so this doesn't loop.
+  const { config: sanitized, secrets: syncedSecrets } = extractSecrets(migrated);
+  const legacy = !config?.targets && cfg.targets;
+  if (legacy || Object.keys(syncedSecrets).length) {
     await chrome.storage.sync.set({ config: sanitized });
-    if (Object.keys(migratedSecrets).length) {
-      await chrome.storage.local.set({ secrets: { ...secrets, ...migratedSecrets } });
+    if (Object.keys(syncedSecrets).length) {
+      await chrome.storage.local.set({ secrets: { ...secrets, ...syncedSecrets } });
     }
   }
   return cfg;
@@ -315,7 +328,16 @@ async function computeState(cfg) {
     return svc ? { state: "ON", service: svc, url: t.url } : { state: "OFF", service: null, url: null };
   }
 
-  const tabs = await chrome.tabs.query({});
+  // P4: let Chrome filter to candidate tabs when every prefix can be a
+  // match pattern; matchService below still has the final say.
+  const patterns = serviceMatchPatterns(cfg);
+  if (patterns && !patterns.length) return { state: "OFF", service: null, url: null };
+  let tabs;
+  try {
+    tabs = await chrome.tabs.query(patterns ? { url: patterns } : {});
+  } catch {
+    tabs = await chrome.tabs.query({});
+  }
   for (const t of tabs) {
     const svc = matchService(t.url || "", cfg);
     if (svc) return { state: "ON", service: svc, url: t.url || null };
@@ -386,8 +408,11 @@ async function callUrl(url, timeoutSec, fetchOpts = {}) {
       return { ok: r.ok, status: r.status, text, error: false };
     } catch (e) {
       if (outer?.aborted) return SUPERSEDED;
-      if (attempt >= RETRY_MAX) {
-        const errorMsg = e?.name === "AbortError" ? "timeout" : (e?.message || "network error");
+      // P5: a timeout means the host is down/unreachable — retrying would
+      // only multiply the wait. Retry fast network errors only.
+      const timedOut = e?.name === "AbortError";
+      if (timedOut || attempt >= RETRY_MAX) {
+        const errorMsg = timedOut ? "timeout" : (e?.message || "network error");
         return { ok: false, status: 0, text: "", error: true, errorMsg };
       }
       await sleep(backoffMs(attempt));
@@ -632,7 +657,8 @@ async function applySideEffects(next, cfg, reason = "") {
   edgeAbort = new AbortController();
   const signal = edgeAbort.signal;
 
-  await setToolbarIcon(next.state, cfg);
+  // P6: the icon update runs alongside the target requests, not before.
+  const iconJob = setToolbarIcon(next.state, cfg);
   const vars = makeVars(next, cfg);
   const timeoutSec = clampTimeoutSec(cfg.timeoutSec, 3);
 
@@ -642,6 +668,7 @@ async function applySideEffects(next, cfg, reason = "") {
     jobs.push(dispatchTarget(t, vars, timeoutSec, signal).then(r => ({ ...r, action: "edge" })));
   }
   const results = (await Promise.allSettled(jobs)).map(r => r.value).filter(Boolean);
+  await iconJob;
   await logActivity({ kind: "edge", reason, to: next.state, service: next.service || "", targets: results });
 }
 
@@ -788,8 +815,20 @@ chrome.alarms?.onAlarm.addListener(alarm => {
 // onStartup nor onInstalled fires).
 ensureReconcileAlarm();
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Only this extension's own pages may drive the worker.
+  if (sender?.id !== chrome.runtime.id) return false;
   (async () => {
+    if (msg?.type === "TEST_TARGET") {
+      // S9: the options Test buttons run through the exact live executor,
+      // so a test can never disagree with real dispatch. Uses its own
+      // signal so a meeting edge doesn't cancel a test.
+      const target = { ...(msg.target || {}), enabled: true };
+      const vars = { state: msg.state === "ON" ? "ON" : "OFF", service: "test", url: "", ts: Date.now() };
+      const r = await dispatchTarget(target, vars, clampTimeoutSec(msg.timeoutSec, 3), new AbortController().signal);
+      sendResponse({ ok: r.ok === true, status: r.status || 0, error: r.error || "", via: r.via || "", ms: r.ms, skipped: !!r.skipped });
+      return;
+    }
     if (msg?.type === "GET_STATE") {
       await ensureCurrent();
       const pause = await getPause();

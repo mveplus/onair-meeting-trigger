@@ -18,23 +18,29 @@ stable so commits/PRs can reference them (e.g. `fix(S1): …`).
 - [x] **S3 — Custom headers survive cross-origin redirects.** Fetch strips only
   `Authorization`; `X-API-Token` follows a redirect. Fix: `redirect: "error"` on
   credentialed requests (worker + options Test). *(fix/review-security-speed)*
-- [ ] **S4 — Secret coverage gaps.** Tokens in URLs (ntfy `?auth=`, HA webhook
+- [x] **S4 — Secret coverage gaps.** Tokens in URLs (ntfy `?auth=`, HA webhook
   IDs, IFTTT keys) sync + export; only `authorization`/`x-api-token` headers are
   treated as secret. Fix: secret header names by pattern
   (`auth|token|key|secret|cookie`); move hook/listener URLs to `storage.local`
   or warn on secret-looking query params.
-- [ ] **S5 — Import can silently enable `includeMeetingUrl`** and add an
+  *Done (wave 2, fix/review-security-speed): isSecretHeader (name pattern) + urlCarriesSecret (secret query params, userinfo, HA/Slack/Discord/IFTTT webhooks); secret URLs stored in `storage.local`; secrets already in sync are moved on next worker load. Limitation: secrets in a plain path (e.g. an ntfy topic name) aren't detectable.*
+- [x] **S5 — Import can silently enable `includeMeetingUrl`** and add an
   exfiltrating listener. Fix: import preview listing destination hosts; confirm
   before accepting `includeMeetingUrl: true`.
-- [ ] **S6 — Custom prefix look-alike match.** `https://webex.com` matches
+  *Done (wave 2, fix/review-security-speed): confirm() listing importDestinations hosts; separate confirm before accepting includeMeetingUrl: true.*
+- [x] **S6 — Custom prefix look-alike match.** `https://webex.com` matches
   `https://webex.com.evil.io/`. Fix: exact origin compare + path prefix.
-- [ ] **S7 — Basic Auth password in a plain text input** (`user:pass`). Split
+  *Done (wave 2, fix/review-security-speed): urlMatchesPrefix: exact origin + path prefix.*
+- [x] **S7 — Basic Auth password in a plain text input** (`user:pass`). Split
   into user + masked password fields.
-- [ ] **S8 — Host permissions never revoked** when targets are removed. Call
+  *Done (wave 2, fix/review-security-speed): separate user / masked password fields.*
+- [x] **S8 — Host permissions never revoked** when targets are removed. Call
   `chrome.permissions.remove` for orphaned origins after save.
-- [ ] **S9 — Options Test duplicates iotHybrid dispatch** (no `clampMode`,
+  *Done (wave 2, fix/review-security-speed): revokeOrphanedPermissions after save (keeps origins of disabled targets).*
+- [x] **S9 — Options Test duplicates iotHybrid dispatch** (no `clampMode`,
   violates the shared.js single-source rule). Move to shared.js or route Test
   through the worker.
+  *Done (wave 2, fix/review-security-speed): Test buttons send TEST_TARGET to the worker → live dispatchTarget; duplicated executors removed from options.js. Worker also rejects messages from other extensions (sender.id check).*
 - [x] **R1 — Out-of-order edges.** A retrying ON request could land after a
   later OFF, leaving a `single` target stuck ON. Fix: edge generation counter;
   in-flight requests from a superseded edge are aborted / not retried.
@@ -49,16 +55,21 @@ stable so commits/PRs can reference them (e.g. `fix(S1): …`).
   `storage.onChanged` (sync `config`, local `secrets`). *(fix/review-security-speed)*
 - [x] **P3 — Redundant icon/state writes on unchanged ticks.** Fix: only
   `setIcon` / `saveCurrent` when something changed. *(fix/review-security-speed)*
-- [ ] **P4 — `tabs.query({})` + loop.** Use `tabs.query({ url: patterns })`
+- [x] **P4 — `tabs.query({})` + loop.** Use `tabs.query({ url: patterns })`
   built from enabled prefixes.
-- [ ] **P5 — Retry on timeout.** A dead LAN host costs ~3× timeout + backoff.
+  *Done (wave 2, fix/review-security-speed): serviceMatchPatterns → tabs.query({url}); falls back to query({}) for ports/query-string prefixes.*
+- [x] **P5 — Retry on timeout.** A dead LAN host costs ~3× timeout + backoff.
   Retry only fast network errors, not `AbortError`.
-- [ ] **P6 — Icon before dispatch.** `applySideEffects` awaits `setIcon` before
+  *Done (wave 2, fix/review-security-speed): callUrl no longer retries AbortError (timeout).*
+- [x] **P6 — Icon before dispatch.** `applySideEffects` awaits `setIcon` before
   firing targets; run concurrently.
-- [ ] **P7 — One permission prompt per origin on Save.** Batch into a single
+  *Done (wave 2, fix/review-security-speed): setIcon runs concurrently with dispatch.*
+- [x] **P7 — One permission prompt per origin on Save.** Batch into a single
   `chrome.permissions.request({ origins: [...] })`.
-- [ ] **P8 — `logActivity` read-modify-write race** drops entries under
+  *Done (wave 2, fix/review-security-speed): one chrome.permissions.request with all origins (also fixes later prompts losing the user gesture).*
+- [x] **P8 — `logActivity` read-modify-write race** drops entries under
   concurrency. Serialize through an in-memory queue.
+  *Done (wave 2, fix/review-security-speed): logActivity serialized via a promise chain.*
 
 ## UI — popup
 

@@ -227,7 +227,42 @@ export function parseCloudStateMode(payload) {
 
 // Header keys we treat as credentials: kept out of synced storage and
 // redacted from exported settings (see extractSecrets / redactSecrets).
+// The explicit list is kept for reference; S4 widened detection to any
+// header whose name looks credential-bearing (X-Api-Key, Cookie, …).
 export const SECRET_HEADER_KEYS = ["authorization", "x-api-token"];
+const SECRET_HEADER_RE = /auth|token|key|secret|cookie|session|passw/i;
+
+export function isSecretHeader(key) {
+  const k = String(key || "").trim();
+  return !!k && (SECRET_HEADER_KEYS.includes(k.toLowerCase()) || SECRET_HEADER_RE.test(k));
+}
+
+// S4: URLs that are themselves credentials — a secret-looking query param,
+// userinfo (user:pass@), or a well-known "the URL is the key" webhook
+// (Home Assistant, Slack, Discord, IFTTT). Such URLs are kept out of sync
+// storage and exports like any other token.
+const SECRET_PARAM_RE = /^(token|access[_-]?token|auth|authorization|key|api[_-]?key|apikey|secret|client[_-]?secret|password|pass|pwd|sig|signature)$/i;
+const SECRET_URL_PATTERNS = [
+  /\/api\/webhook\/[^/?#]+/i,                         // Home Assistant
+  /^https?:\/\/hooks\.slack\.com\/services\//i,
+  /^https?:\/\/(?:\w+\.)?discord(?:app)?\.com\/api\/webhooks\//i,
+  /^https?:\/\/maker\.ifttt\.com\/trigger\/.+\/key\//i
+];
+
+export function urlCarriesSecret(url) {
+  const s = String(url || "").trim();
+  if (!s) return false;
+  if (SECRET_URL_PATTERNS.some(re => re.test(s))) return true;
+  let u;
+  // Templates may contain {tokens}; they don't affect the checks below.
+  try { u = new URL(s); } catch { return false; }
+  if (u.username || u.password) return true;
+  for (const k of u.searchParams.keys()) if (SECRET_PARAM_RE.test(k)) return true;
+  return false;
+}
+
+// URL fields per target type that may hold a URL-borne secret.
+const URL_SECRET_FIELDS = { listener: ["url"], httpHook: ["onUrl", "offUrl"] };
 
 export function trimSlash(s) {
   return (s || "").replace(/\/+$/, "");
@@ -313,12 +348,62 @@ export function getServiceMatchers(cfg) {
   return [...custom, ...builtIns];
 }
 
+// S6: a prefix matches only on the exact origin, then by path prefix — a
+// bare string prefix let `https://webex.com` match
+// `https://webex.com.evil.io/`. Unparseable prefixes never match.
+const parsedPrefixCache = new Map();
+function parsePrefix(p) {
+  if (!parsedPrefixCache.has(p)) {
+    let v = null;
+    try {
+      const u = new URL(p);
+      v = { origin: u.origin, rest: u.pathname + u.search };
+    } catch { /* invalid prefix */ }
+    if (parsedPrefixCache.size > 256) parsedPrefixCache.clear();
+    parsedPrefixCache.set(p, v);
+  }
+  return parsedPrefixCache.get(p);
+}
+
+export function urlMatchesPrefix(url, prefix) {
+  const p = parsePrefix(prefix);
+  if (!p) return false;
+  let u;
+  try { u = new URL(url); } catch { return false; }
+  return u.origin === p.origin && (u.pathname + u.search).startsWith(p.rest);
+}
+
 export function matchService(url, cfg) {
   if (!url) return null;
   for (const svc of getServiceMatchers(cfg)) {
-    if (svc.prefixes.some(p => url.startsWith(p))) return svc.key;
+    if (svc.prefixes.some(p => urlMatchesPrefix(url, p))) return svc.key;
   }
   return null;
+}
+
+// P4: Chrome match patterns for the enabled service prefixes, so the
+// worker can ask tabs.query for matching tabs instead of listing them
+// all. Returns null when any prefix can't be expressed as a pattern
+// (port, query string) — the caller then falls back to querying all tabs.
+// Results are still re-checked with matchService, so semantics don't change.
+export function prefixToMatchPattern(prefix) {
+  let u;
+  try { u = new URL(prefix); } catch { return null; }
+  if (!/^https?:$/.test(u.protocol) || u.port || u.search || u.hash || u.username) return null;
+  if (/[*]/.test(u.hostname + u.pathname)) return null;
+  return `${u.protocol}//${u.hostname}${u.pathname}*`;
+}
+
+export function serviceMatchPatterns(cfg) {
+  const out = new Set();
+  for (const svc of getServiceMatchers(cfg)) {
+    for (const p of svc.prefixes) {
+      const pat = prefixToMatchPattern(p);
+      if (!pat) return null;
+      out.add(pat);
+    }
+  }
+  return [...out];
 }
 
 // ---- normalization -----------------------------------------------------
@@ -468,7 +553,7 @@ function isCleartext(url) {
 export function endpointSecurityWarnings(target) {
   const warnings = [];
   const flag = (url, hasToken, label) => {
-    if (!url || !hasToken) return;
+    if (!url || !(hasToken || urlCarriesSecret(url))) return;
     if (isCleartext(url) && !isPrivateHost(url)) {
       warnings.push(`${label} sends a token over plain HTTP — use HTTPS`);
     }
@@ -478,11 +563,13 @@ export function endpointSecurityWarnings(target) {
     flag(target.localBase, hasText(target.localToken), "Local endpoint");
   } else if (target?.type === "httpHook") {
     const hasAuthHeader = (target.headers || [])
-      .some(h => SECRET_HEADER_KEYS.includes(String(h?.key || "").toLowerCase()) && hasText(h?.value));
+      .some(h => isSecretHeader(h?.key) && hasText(h?.value));
     const hasBasic = !!(target.basicAuth && (target.basicAuth.user || target.basicAuth.pass));
     const hasToken = hasAuthHeader || hasBasic;
     flag(target.onUrl, hasToken, "ON URL");
     flag(target.offUrl, hasToken, "OFF URL");
+  } else if (target?.type === "listener") {
+    flag(target.url, false, "Listener URL");
   }
   return warnings;
 }
@@ -499,7 +586,7 @@ export function redirectPolicyFor(target) {
   if (target?.type === "iotHybrid") return "error"; // always token-bearing APIs
   if (target?.type === "httpHook") {
     const hasHeaderCred = (target.headers || [])
-      .some(h => SECRET_HEADER_KEYS.includes(String(h?.key || "").toLowerCase()) && hasText(h?.value));
+      .some(h => isSecretHeader(h?.key) && hasText(h?.value));
     const hasBasic = !!(target.basicAuth && (target.basicAuth.user || target.basicAuth.pass));
     return hasHeaderCred || hasBasic ? "error" : "follow";
   }
@@ -534,9 +621,16 @@ export function extractSecrets(cfg) {
       const hs = {};
       for (const h of t.headers || []) {
         const k = String(h.key || "").toLowerCase();
-        if (SECRET_HEADER_KEYS.includes(k) && hasText(h.value)) { hs[k] = h.value; h.value = ""; }
+        if (isSecretHeader(k) && hasText(h.value)) { hs[k] = h.value; h.value = ""; }
       }
       if (Object.keys(hs).length) s.headers = hs;
+    }
+    // S4: whole URLs that are credentials (webhook keys, ?token=…).
+    for (const f of URL_SECRET_FIELDS[t.type] || []) {
+      if (urlCarriesSecret(t[f])) {
+        (s.urls ||= {})[f] = t[f];
+        t[f] = "";
+      }
     }
     if (Object.keys(s).length) secrets[t.id] = s;
   }
@@ -565,6 +659,9 @@ export function applySecrets(cfg, secrets = {}) {
           if (s.headers[k] && !hasText(h.value)) h.value = s.headers[k];
         }
       }
+    }
+    for (const [f, v] of Object.entries(s.urls || {})) {
+      if ((URL_SECRET_FIELDS[t.type] || []).includes(f) && !hasText(t[f])) t[f] = v;
     }
   }
   return merged;
@@ -744,4 +841,47 @@ export function settingsSignature(cfg) {
 // can change which meeting service matches.
 export function isRelevantTabUpdate(changeInfo) {
   return changeInfo?.url !== undefined || changeInfo?.status === "complete";
+}
+
+// ---- host permissions (P7 / S8) ----------------------------------------
+
+// `scheme://host[:port]/*` permission pattern for a URL (same shape the
+// options page has always requested), or null if unparseable.
+export function originPatternFor(url) {
+  try {
+    const u = new URL(String(url).replace(/\{[a-z_]+\}/g, "x"));
+    if (!/^https?:$/.test(u.protocol)) return null;
+    return `${u.protocol}//${u.host}/*`;
+  } catch {
+    return null;
+  }
+}
+
+// Deduplicated permission patterns for a list of URLs (one prompt — P7).
+export function originPatternsFor(urls) {
+  return [...new Set((urls || []).map(originPatternFor).filter(Boolean))];
+}
+
+// S8: granted origins that no target uses any more. Only http(s) site
+// patterns are candidates; anything else (e.g. a broad grant) is left alone.
+export function orphanedOrigins(granted, keepPatterns) {
+  const keep = new Set(keepPatterns || []);
+  return (granted || []).filter(o =>
+    /^https?:\/\/[^*/]+\/\*$/.test(o) && !keep.has(o)
+  );
+}
+
+// ---- import review (S5) -------------------------------------------------
+
+// Hosts an imported set of targets would send requests to, for the
+// confirmation shown before an import is applied.
+export function importDestinations(targets) {
+  const hosts = new Set();
+  const add = u => { try { hosts.add(new URL(String(u).replace(/\{[a-z_]+\}/g, "x")).host); } catch { /* skip */ } };
+  for (const t of targets || []) {
+    for (const f of ["url", "onUrl", "offUrl", "baseUrl", "localBase", "cloudBase"]) {
+      if (t?.[f]) add(t[f]);
+    }
+  }
+  return [...hosts].sort();
 }

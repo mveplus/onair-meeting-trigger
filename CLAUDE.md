@@ -101,6 +101,14 @@ docs/, resources/  Documentation and store assets
   (encodeURIComponent), JSON bodies `"json"` (`bodyEncodingFor`); `{url_raw}`
   is the unescaped escape hatch. Credentialed requests use
   `redirectPolicyFor` → `redirect: "error"`.
+- **Secret detection** is by pattern, not a fixed list: `isSecretHeader`
+  (auth/token/key/secret/cookie/session/passw) and `urlCarriesSecret`
+  (secret query params, userinfo, HA/Slack/Discord/IFTTT webhook URLs). Secret
+  URLs (`listener.url`, `httpHook.onUrl/offUrl`) are split into
+  `secrets[id].urls`; `loadConfig` moves any secrets it finds in sync to local.
+- **Options Test buttons** send `TEST_TARGET` to the worker, which runs the
+  live `dispatchTarget` — there is no separate test executor in options.js.
+  The worker ignores messages whose `sender.id` isn't this extension.
 
 ## Open review backlog
 

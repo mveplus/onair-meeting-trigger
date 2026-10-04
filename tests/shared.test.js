@@ -50,7 +50,15 @@ import {
   describeLogEntry,
   bodyEncodingFor,
   redirectPolicyFor,
-  isRelevantTabUpdate
+  isRelevantTabUpdate,
+  isSecretHeader,
+  urlCarriesSecret,
+  urlMatchesPrefix,
+  prefixToMatchPattern,
+  serviceMatchPatterns,
+  originPatternsFor,
+  orphanedOrigins,
+  importDestinations
 } from "../extension/shared.js";
 
 // ---------------------------------------------------------------------------
@@ -803,5 +811,119 @@ describe("P1: tab update filtering", () => {
     assert.equal(isRelevantTabUpdate({ favIconUrl: "x" }), false);
     assert.equal(isRelevantTabUpdate({ audible: true }), false);
     assert.equal(isRelevantTabUpdate(undefined), false);
+  });
+});
+
+describe("S4: wider secret detection", () => {
+  test("credential-looking header names are secret", () => {
+    for (const k of ["Authorization", "X-API-Token", "X-Api-Key", "Cookie", "X-Auth-Token", "Api-Key", "X-Session-Id"]) {
+      assert.equal(isSecretHeader(k), true, k);
+    }
+    for (const k of ["Content-Type", "Accept", "User-Agent", "Keep-Alive", ""]) {
+      assert.equal(isSecretHeader(k), false, k);
+    }
+  });
+
+  test("URL-borne secrets are recognized", () => {
+    for (const u of [
+      "http://ha.local:8123/api/webhook/abc123",
+      "https://hooks.slack.com/services/T0/B0/xyz",
+      "https://discord.com/api/webhooks/1/abc",
+      "https://maker.ifttt.com/trigger/onair/with/key/abc",
+      "https://ntfy.sh/topic?auth=xyz",
+      "https://api.example.com/x?api_key=1&state={state}",
+      "https://user:pw@example.com/x"
+    ]) {
+      assert.equal(urlCarriesSecret(u), true, u);
+    }
+    for (const u of ["http://127.0.0.1:8765/event?state={state}&url={url}", "http://192.168.1.17/cm?cmnd=Power%20On", "", "nope"]) {
+      assert.equal(urlCarriesSecret(u), false, u);
+    }
+  });
+
+  test("custom secret headers and secret URLs round-trip through extract/apply", () => {
+    const cfg = { targets: [
+      { id: "h1", type: "httpHook", onUrl: "http://ha.local/api/webhook/on123", offUrl: "http://lan/off",
+        headers: [{ key: "X-Api-Key", value: "k" }, { key: "Content-Type", value: "text/plain" }] },
+      { id: "l1", type: "listener", url: "https://ntfy.sh/t?auth=abc" }
+    ] };
+    const { config: clean, secrets } = extractSecrets(cfg);
+    const json = JSON.stringify(clean);
+    for (const leak of ["on123", "\"k\"", "auth=abc"]) assert.ok(!json.includes(leak), leak);
+    assert.equal(clean.targets[0].offUrl, "http://lan/off");
+    assert.equal(clean.targets[0].headers[1].value, "text/plain");
+    assert.deepEqual(applySecrets(clean, secrets), cfg);
+  });
+
+  test("a secret listener URL over public http warns", () => {
+    assert.equal(endpointSecurityWarnings({ type: "listener", url: "http://example.com/x?token=1" }).length, 1);
+    assert.equal(endpointSecurityWarnings({ type: "listener", url: "http://example.com/x" }).length, 0);
+  });
+});
+
+describe("S6: origin-exact prefix matching", () => {
+  test("look-alike hosts don't match", () => {
+    assert.equal(urlMatchesPrefix("https://webex.com.evil.io/x", "https://webex.com"), false);
+    assert.equal(urlMatchesPrefix("https://webex.com@evil.io/x", "https://webex.com"), false);
+    assert.equal(urlMatchesPrefix("http://webex.com/x", "https://webex.com"), false);
+  });
+
+  test("same origin + path prefix matches", () => {
+    assert.equal(urlMatchesPrefix("https://webex.com/meet/1", "https://webex.com"), true);
+    assert.equal(urlMatchesPrefix("https://WEBEX.com/meet/1", "https://webex.com/meet/"), true);
+    assert.equal(urlMatchesPrefix("https://webex.com/other", "https://webex.com/meet/"), false);
+    assert.equal(urlMatchesPrefix("https://webex.com/x", "not a url"), false);
+  });
+
+  test("matchService uses the safe matcher for custom services", () => {
+    const cfg = { customServices: [{ enabled: true, name: "webex", prefixes: ["https://webex.com"] }] };
+    assert.equal(matchService("https://webex.com.evil.io/", cfg), null);
+    assert.equal(matchService("https://webex.com/m", cfg), "webex");
+  });
+});
+
+describe("P4: match patterns for tabs.query", () => {
+  test("prefixes convert to Chrome match patterns", () => {
+    assert.equal(prefixToMatchPattern("https://meet.google.com/"), "https://meet.google.com/*");
+    assert.equal(prefixToMatchPattern("https://x.com/meet"), "https://x.com/meet*");
+    assert.equal(prefixToMatchPattern("http://x:8080/"), null);
+    assert.equal(prefixToMatchPattern("https://x.com/?a=1"), null);
+    assert.equal(prefixToMatchPattern("file:///x"), null);
+  });
+
+  test("any unconvertible prefix falls back to null (query all tabs)", () => {
+    assert.deepEqual(serviceMatchPatterns({ services: { meet: true } }), ["https://meet.google.com/*"]);
+    assert.deepEqual(serviceMatchPatterns({ services: {} }), []);
+    assert.equal(serviceMatchPatterns({ services: { meet: true },
+      customServices: [{ enabled: true, name: "c", prefixes: ["http://lan:9000/"] }] }), null);
+  });
+});
+
+describe("P7 / S8: host permission helpers", () => {
+  test("origin patterns are deduplicated and template-safe", () => {
+    assert.deepEqual(
+      originPatternsFor(["http://a:8080/x?s={state}", "http://a:8080/y", "https://b/", "bad", "ftp://c/"]),
+      ["http://a:8080/*", "https://b/*"]
+    );
+  });
+
+  test("orphaned origins exclude kept and non-site grants", () => {
+    assert.deepEqual(
+      orphanedOrigins(["http://a/*", "http://b:81/*", "<all_urls>", "https://*/*"], ["http://a/*"]),
+      ["http://b:81/*"]
+    );
+  });
+});
+
+describe("S5: import destinations", () => {
+  test("lists every host an import would contact", () => {
+    assert.deepEqual(
+      importDestinations([
+        { type: "listener", url: "https://evil.example/x?u={url}" },
+        { type: "iotHybrid", localBase: "http://10.0.0.5", cloudBase: "https://api.aws.com" },
+        { type: "httpHook", onUrl: "https://evil.example/on", offUrl: "" }
+      ]),
+      ["10.0.0.5", "api.aws.com", "evil.example"]
+    );
   });
 });
