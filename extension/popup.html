@@ -19,6 +19,9 @@
       --paused-bg: #f6e7c8;
       --paused-ink: #6b5417;
       --accent: #00b0b0;
+      --ok-ink: #1f6b35;
+      --warn-ink: #8a5a1f;
+      --warn-bg: #fff3e2;
     }
     body[data-theme="dark"] {
       --ink: #e7f3f5;
@@ -35,6 +38,9 @@
       --paused-bg: #3a2c1b;
       --paused-ink: #ffd6a6;
       --accent: #35d5d5;
+      --ok-ink: #9fe0b5;
+      --warn-ink: #ffd6a6;
+      --warn-bg: #3a2c1b;
     }
     * { box-sizing: border-box; }
     body {
@@ -58,10 +64,16 @@
     .statusBig { font-size: 20px; font-weight: 800; letter-spacing: 0.4px; }
     .statusSub { font-size: 13px; margin-top: 4px; opacity: 0.92; }
     .muted { color: var(--muted); font-size: 12px; }
-    .targetsLine { margin: 10px 2px 0; }
-    .targetsLine a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+    .health { margin: 10px 2px 0; line-height: 1.35; }
+    .health.ok { color: var(--ok-ink); }
+    .health.warn { color: var(--warn-ink); background: var(--warn-bg); border-radius: 8px; padding: 6px 8px; margin: 10px 0 0; }
+    .health a, .footer a { color: var(--accent); cursor: pointer; text-decoration: underline; }
     .pauseRow { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; margin-top: 12px; }
     .pauseRow .lbl { font-size: 12px; color: var(--muted); margin-right: 2px; }
+    .pauseRow button { flex: 1; white-space: nowrap; }
+    .footer { display:flex; justify-content: flex-end; align-items:center; gap: 8px; margin-top: 12px; font-size: 12px; }
+    .footer a { text-decoration: none; color: var(--muted); }
+    .footer a:hover { color: var(--accent); }
     button {
       padding: 7px 11px;
       border-radius: 10px;
@@ -72,7 +84,6 @@
       font-size: 13px;
     }
     button:hover { border-color: var(--accent); }
-    button.primary { width: 100%; margin-top: 12px; font-weight: 600; }
     button.small { padding: 5px 9px; font-size: 12px; }
     .buildBadge {
       display: none;
@@ -95,13 +106,14 @@
       <div class="statusSub" id="status_sub">No meeting detected</div>
     </div>
 
-    <div class="targetsLine muted" id="targets_line"></div>
+    <div class="health muted" id="health" role="status"></div>
 
     <div class="pauseRow" id="pause_row"></div>
 
-    <button id="openOptions" class="primary">⚙ Settings</button>
-
     <div class="muted" id="icon_hint" style="display:none; margin-top:10px;">Grayscale icon = OFF. Color icon = ON.</div>
+    <div class="footer">
+      <a id="openOptions" role="button" tabindex="0">⚙ Settings</a>
+    </div>
     <div class="buildBadge" id="build_badge" title="Unpacked dev build — git branch @ commit"></div>
   </div>
   <script type="module" src="popup.js"></script>

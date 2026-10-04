@@ -16,8 +16,9 @@ import {
   resolveExportSecrets,
   exportFileName,
   formatBuildBadge,
-  BLANK_CHOICES,
-  resolveAddChoice,
+  targetHost,
+  describeTestResult,
+  missingOrigins,
   settingsSignature,
   reconcileModesFor,
   resolveReconcile,
@@ -181,11 +182,25 @@ function esc(s){
 }
 function newId(prefix="t"){ return `${prefix}_${Math.random().toString(16).slice(2,10)}`; }
 
-function showStatus(msg, ok=true) {
-  const s = $("status");
-  s.textContent = msg;
-  s.style.color = ok ? "#0a0" : "#a00";
-  setTimeout(()=>{ s.textContent = ""; }, 2500);
+// Page-level messages show as a toast pinned to the bottom of the
+// viewport, so they're visible wherever you are on the page. `action`
+// ({ label, onClick }) adds a button — used for Undo (U12).
+let toastTimer = null;
+function showStatus(msg, ok = true, action = null) {
+  const toast = $("toast");
+  $("toast_msg").textContent = msg;
+  toast.classList.toggle("fail", !ok);
+  const btn = $("toast_action");
+  btn.hidden = !action;
+  btn.onclick = action ? () => { hideToast(); action.onClick(); } : null;
+  if (action) btn.textContent = action.label;
+  toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, action ? 7000 : 3000);
+}
+
+function hideToast() {
+  $("toast").classList.remove("show");
 }
 
 function migrateIfNeeded(config) {
@@ -280,7 +295,14 @@ function normalizeHeadersList(headers) {
     .filter(h => h && h.key);
 }
 
+// Imported targets keep their user-facing name (U7).
 function normalizeTarget(raw) {
+  const t = normalizeTargetFields(raw);
+  if (t) t.name = String(raw?.name || "").trim().slice(0, 60);
+  return t;
+}
+
+function normalizeTargetFields(raw) {
   const type = raw?.type;
   if (type === "listener") {
     const url = String(raw?.url || "").trim();
@@ -364,8 +386,7 @@ function renderCustomServices(cfg) {
     div.innerHTML = `
       <div class="targetHead">
         <div>
-          <b>${esc(s.name || "Custom Service")}</b>
-          <span class="pill">${esc(s.id)}</span>
+          <b>${esc(s.name || "Custom service")}</b>
         </div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
           <label style="margin:0;"><input type="checkbox" class="s_enabled" ${s.enabled ? "checked":""}> Enabled</label>
@@ -381,8 +402,20 @@ function renderCustomServices(cfg) {
     `;
 
     div.querySelector(".s_remove").addEventListener("click", () => {
-      cfg.customServices.splice(idx, 1);
+      readCustomServicesFromUI(cfg, { keepIncomplete: true });
+      const at = cfg.customServices.findIndex(x => x.id === s.id);
+      if (at < 0) return renderCustomServices(cfg);
+      const [removed] = cfg.customServices.splice(at, 1);
       renderCustomServices(cfg);
+      // U12: removal is immediate, so offer a way back.
+      showStatus(`Removed “${removed.name || "custom service"}” — not saved yet`, true, {
+        label: "Undo",
+        onClick: () => {
+          readCustomServicesFromUI(cfg, { keepIncomplete: true });
+          cfg.customServices.splice(Math.min(at, cfg.customServices.length), 0, removed);
+          renderCustomServices(cfg);
+        }
+      });
     });
 
     wrap.appendChild(div);
@@ -390,7 +423,9 @@ function renderCustomServices(cfg) {
   refreshDirty();
 }
 
-function readCustomServicesFromUI(cfg) {
+// `keepIncomplete` keeps half-filled rows (no name / no prefix yet) — used
+// before re-rendering so an add/remove doesn't wipe what's being typed.
+function readCustomServicesFromUI(cfg, { keepIncomplete = false } = {}) {
   const wrap = $("custom_services");
   const nodes = [...wrap.querySelectorAll(".serviceItem")];
   const out = [];
@@ -401,7 +436,7 @@ function readCustomServicesFromUI(cfg) {
     const enabled = !!n.querySelector(".s_enabled")?.checked;
     const prefixesRaw = (n.querySelector(".s_prefixes")?.value || "").split("\n");
     const prefixes = normalizePrefixes(prefixesRaw);
-    if (!name || prefixes.length === 0) continue;
+    if (!keepIncomplete && (!name || prefixes.length === 0)) continue;
     out.push({ id, name, enabled, prefixes });
   }
 
@@ -422,6 +457,26 @@ function shouldOpenAdvanced(hook) {
   return hasHeaders || hasBody || hasAuth || hasMatch || hasCustomCodes || hasCheckOverride;
 }
 
+// Fallback title for a target the user hasn't named.
+function defaultLabel(t) {
+  return t.type === "listener" ? "Listener"
+    : t.type === "simpleLed" ? "LED sign"
+    // A cloud-only iotHybrid (no local URL) is just the AWS bridge; only
+    // call it "local + cloud" once a LAN path is actually configured.
+    : t.type === "iotHybrid" ? (t.localBase ? "ON-AIR sign (local + cloud)" : "ON-AIR sign (cloud)")
+    : "Webhook";
+}
+
+// U7: ids of target cards currently expanded. Cards start collapsed to a
+// one-line summary; newly added / imported targets open expanded.
+const expanded = new Set();
+
+function setExpanded(div, open) {
+  div.classList.toggle("open", open);
+  div.querySelector(".chev")?.setAttribute("aria-expanded", String(open));
+  if (open) expanded.add(div.dataset.id); else expanded.delete(div.dataset.id);
+}
+
 function renderTargets(cfg) {
   const wrap = $("targets");
   wrap.innerHTML = "";
@@ -429,47 +484,47 @@ function renderTargets(cfg) {
   if (!(cfg.targets || []).length) {
     const empty = document.createElement("div");
     empty.className = "emptyTargets";
-    empty.textContent = "No targets yet — pick one from “Add a target…” above to drive your sign or service.";
+    empty.textContent = "No targets yet — add your ON-AIR sign, an LED, or a webhook above.";
     wrap.appendChild(empty);
     refreshDirty();
     return;
   }
 
-  (cfg.targets || []).forEach((t, idx) => {
-    const typeLabel = t.type === "listener" ? "Local listener"
-      : t.type === "simpleLed" ? "LED sign"
-      // A cloud-only iotHybrid (no local URL) is just the AWS bridge; only
-      // call it "local + cloud" once a LAN path is actually configured.
-      : t.type === "iotHybrid" ? (t.localBase ? "IoT (local + cloud)" : "Cloud Bridge (AWS IoT Lambda)")
-      : "HTTP request";
-
+  (cfg.targets || []).forEach((t) => {
     const div = document.createElement("div");
-    div.className = "target";
+    const open = expanded.has(t.id);
+    div.className = `target${open ? " open" : ""}${t.enabled ? "" : " disabled"}`;
     div.dataset.id = t.id;
 
     div.innerHTML = `
-      <div class="targetHead">
-        <div class="targetTitle">
-          <label style="margin:0; display:flex; gap:8px; align-items:center;">
-            <input type="checkbox" class="t_enabled" ${t.enabled ? "checked":""}>
-            <b>${esc(typeLabel)}</b>
+      <div class="targetSummary">
+        <button type="button" class="chev" aria-label="Show details" aria-expanded="${open}">▸</button>
+        <input type="checkbox" class="t_enabled" title="Enabled" aria-label="Enabled" ${t.enabled ? "checked":""}>
+        <span class="t_title"></span>
+        <span class="t_host muted"></span>
+        <span class="t_state"></span>
+        <span class="spacer"></span>
+        <button type="button" class="t_test_on small">Test ON</button>
+        <button type="button" class="t_test_off small">Test OFF</button>
+      </div>
+      <div class="t_result" role="status"></div>
+      <div class="t_details">
+        <label>Name
+          <input type="text" class="t_name" maxlength="60" placeholder="${esc(defaultLabel(t))}" value="${esc(t.name || "")}">
+        </label>
+        ${t.type === "httpHook" ? `
+          <label>Method
+            <select class="t_method selectButton compact">
+              ${["GET","POST","PUT"].map(m => `<option value="${m}" ${String(t.method||"GET").toUpperCase()===m?"selected":""}>${m}</option>`).join("")}
+            </select>
           </label>
-          <span class="pill">${esc(t.id)}</span>
-        </div>
-        <div class="targetActions">
-          ${t.type === "httpHook" ? `
-              <select class="t_method actionCtrl" title="Method">
-                ${["GET","POST","PUT"].map(m => `<option value="${m}" ${String(t.method||"GET").toUpperCase()===m?"selected":""}>${m}</option>`).join("")}
-              </select>
-          ` : ``}
-          <button class="t_test_on actionCtrl">Test ON</button>
-          <button class="t_test_off actionCtrl">Test OFF</button>
-          <button class="danger t_remove actionCtrl">Remove</button>
+        ` : ``}
+        <div class="t_body"></div>
+        <div class="detailFoot">
+          <div class="validation"></div>
+          <button type="button" class="danger small t_remove">Remove</button>
         </div>
       </div>
-
-      <div class="t_body" style="margin-top:10px;"></div>
-      <div class="validation" style="margin-top:8px;"></div>
     `;
 
     const body = div.querySelector(".t_body");
@@ -490,7 +545,7 @@ function renderTargets(cfg) {
         <div class="muted">Uses <code>/led/on</code>, <code>/led/off</code>, optional <code>/led/status</code>.</div>
       `;
     } else if (t.type === "iotHybrid") {
-      const modeOpts = [[0, "off"], [1, "on"], [2, "breathing"]];
+      const modeOpts = [[0, "Off"], [1, "On"], [2, "Breathing"]];
       const modeOn = Number(t.modeOn ?? 1);
       const modeOff = Number(t.modeOff ?? 0);
       // The cloud (AWS IoT Lambda) bridge is the primary, always-visible
@@ -512,14 +567,14 @@ function renderTargets(cfg) {
           <div>
             <label>ON mode
               <select class="t_modeOn">
-                ${modeOpts.map(([v, lbl]) => `<option value="${v}" ${v===modeOn?"selected":""}>${v} (${lbl})</option>`).join("")}
+                ${modeOpts.map(([v, lbl]) => `<option value="${v}" ${v===modeOn?"selected":""}>${lbl}</option>`).join("")}
               </select>
             </label>
           </div>
           <div>
             <label>OFF mode
               <select class="t_modeOff">
-                ${modeOpts.map(([v, lbl]) => `<option value="${v}" ${v===modeOff?"selected":""}>${v} (${lbl})</option>`).join("")}
+                ${modeOpts.map(([v, lbl]) => `<option value="${v}" ${v===modeOff?"selected":""}>${lbl}</option>`).join("")}
               </select>
             </label>
           </div>
@@ -594,10 +649,31 @@ function renderTargets(cfg) {
     // after the type-specific body so every target exposes it.
     body.insertAdjacentHTML("beforeend", reconcileSelectHtml(t));
 
-    // Wire remove
+    // Expand / collapse from the chevron or the summary text.
+    for (const sel of [".chev", ".t_title", ".t_host"]) {
+      div.querySelector(sel).addEventListener("click", () => setExpanded(div, !div.classList.contains("open")));
+    }
+    div.querySelector(".t_enabled").addEventListener("change", e => {
+      div.classList.toggle("disabled", !e.target.checked);
+    });
+
+    // Remove — immediate, with Undo (U12). Unsaved edits in every card are
+    // read back first so the re-render doesn't lose them.
     div.querySelector(".t_remove").addEventListener("click", () => {
-      cfg.targets.splice(idx, 1);
+      readTargetsFromUI(cfg);
+      const at = cfg.targets.findIndex(x => x.id === t.id);
+      if (at < 0) return renderTargets(cfg);
+      const [removed] = cfg.targets.splice(at, 1);
       renderTargets(cfg);
+      showStatus(`Removed “${removed.name || defaultLabel(removed)}” — not saved yet`, true, {
+        label: "Undo",
+        onClick: () => {
+          readTargetsFromUI(cfg);
+          cfg.targets.splice(Math.min(at, cfg.targets.length), 0, removed);
+          expanded.add(removed.id);
+          renderTargets(cfg);
+        }
+      });
     });
     div.querySelector(".t_test_on").addEventListener("click", () => testTargetNode(div, t, "ON"));
     div.querySelector(".t_test_off").addEventListener("click", () => testTargetNode(div, t, "OFF"));
@@ -634,7 +710,7 @@ function reconcileSelectHtml(t) {
     .join("");
   return `
     <details class="advanced" style="margin-top:8px;" ${cur !== "single" ? "open" : ""}>
-      <summary>Reconcile behavior</summary>
+      <summary>Keep the sign in sync</summary>
       <label>While a meeting is ongoing
         <select class="t_reconcile">${opts}</select>
       </label>
@@ -646,9 +722,17 @@ function wireValidation(node, t) {
   const validation = node.querySelector(".validation");
   if (!validation) return;
   const inputs = [...node.querySelectorAll("input, textarea, select")];
+  // Keeps the collapsed one-line summary (name · host · status) in step
+  // with the form as you type.
   const update = () => {
     const v = validateTargetNode(node, t);
-    validation.innerHTML = v.length ? v.map(msg => `<span class="badge warn">${esc(msg)}</span>`).join(" ") : `<span class="badge">Ready</span>`;
+    validation.innerHTML = v.length ? v.map(msg => `<span class="badge warn">${esc(msg)}</span>`).join(" ") : "";
+    const built = buildTargetFromNode(node, t);
+    node.querySelector(".t_title").textContent = built.name || defaultLabel(built);
+    node.querySelector(".t_host").textContent = targetHost(built) || "not set up yet";
+    node.querySelector(".t_state").innerHTML = v.length
+      ? `<span class="badge warn">⚠ ${esc(v[0])}${v.length > 1 ? ` (+${v.length - 1})` : ""}</span>`
+      : `<span class="badge">Ready</span>`;
   };
   inputs.forEach(i => i.addEventListener("input", update));
   update();
@@ -684,7 +768,7 @@ function validateTargetNode(node, t) {
 
 function buildTargetFromNode(node, t) {
   const enabled = !!node.querySelector(".t_enabled")?.checked;
-  const base = { ...t, enabled };
+  const base = { ...t, enabled, name: (node.querySelector(".t_name")?.value || "").trim() };
 
   if (t.type === "listener") {
     base.url = node.querySelector(".t_url")?.value.trim() || "";
@@ -747,15 +831,18 @@ function buildTargetFromNode(node, t) {
 async function testTargetNode(node, t, state) {
   const target = buildTargetFromNode(node, t);
   target.enabled = true;
+  // U8: the result shows on the card, next to the button you pressed.
+  const out = node.querySelector(".t_result");
+  const show = (cls, text) => { out.className = `t_result ${cls}`; out.textContent = text; };
 
-  // Request host permission for every URL this target would hit
-  // BEFORE we call fetch. Otherwise the first Test on a freshly
-  // imported / freshly added row gets blocked at the CORS preflight
-  // because the origin isn't in the extension's granted set. Each Test
-  // click is a user gesture, so it can pop the (single — P7) dialog.
+  // Request host permission for every URL this target would hit BEFORE
+  // the fetch, or the first Test on a fresh row is blocked at the CORS
+  // preflight. Each click is a user gesture, so it can show the (single —
+  // P7) Chrome dialog; this must stay the first await.
   if (!(await ensureHostPermissions(getOriginsFromTargets({ targets: [target] })))) {
-    return showStatus("Permission denied — the extension can't reach this target", false);
+    return show("fail", `Test ${state}: Not allowed — Chrome access to this address was declined`);
   }
+  show("busy", `Testing ${state}…`);
 
   // S9: run the test through the service worker's live executor so a
   // test can never disagree with real dispatch.
@@ -767,16 +854,8 @@ async function testTargetNode(node, t, state) {
   } catch {
     res = null;
   }
-  showStatus(`Test ${state}: ${describeTestResult(res)}`, !!res?.ok);
-}
-
-function describeTestResult(res) {
-  if (!res) return "FAIL — background worker didn't respond";
-  if (res.ok) return `OK${res.via ? ` via ${res.via}` : ""}${res.status ? ` (HTTP ${res.status})` : ""}`;
-  if (res.skipped) return "FAIL — nothing to send (URL missing?)";
-  if (res.error) return `FAIL — ${res.error}`;
-  if (res.status) return `FAIL — HTTP ${res.status}`;
-  return "FAIL — no URL for this state, or response didn't match";
+  const r = describeTestResult(res);
+  show(r.ok ? "ok" : "fail", `Test ${state}: ${r.ok ? "✓" : "✗"} ${r.text}`);
 }
 
 function readTargetsFromUI(cfg) {
@@ -824,7 +903,7 @@ async function load() {
   window.__cfg = cfg;
   // Baseline for "unsaved changes" detection — set before rendering so the
   // initial render reads as clean.
-  savedSignature = settingsSignature(cfg);
+  savedSignature = editsSignature(cfg);
   renderCustomServices(cfg);
   renderTargets(cfg);
   refreshDirty();
@@ -833,6 +912,7 @@ async function load() {
 function addCustomService() {
   const cfg = window.__cfg;
   if (!cfg.customServices) cfg.customServices = [];
+  readCustomServicesFromUI(cfg, { keepIncomplete: true });
   cfg.customServices.push({
     id: newId("svc"),
     name: "",
@@ -878,16 +958,26 @@ function addTarget(type, templateKey = "") {
       localTimeoutMs: tpl?.localTimeoutMs ?? 1500
     });
   } else {
-    const key = templateKey && TEMPLATES[templateKey] ? templateKey : "tasmota";
-    const template = TEMPLATES[key].target;
+    // A template pre-fills the hook; the plain "Webhook" button starts blank.
+    const template = templateKey && TEMPLATES[templateKey] ? TEMPLATES[templateKey].target : {
+      type: "httpHook", onUrl: "", offUrl: "", method: "GET", headers: [], body: "", basicAuth: null,
+      checkStatus: true, statusCodes: [...DEFAULT_STATUS_CODES], matchOn: "", matchOff: ""
+    };
     cfg.targets.push({
       id: newId("hook"),
       type: "httpHook",
       enabled: true,
+      name: templateKey && TEMPLATES[templateKey] ? TEMPLATES[templateKey].label.replace(/\s*\(.*\)$/, "") : "",
       ...template
     });
   }
+  // New targets open expanded, scrolled into view, ready to fill in.
+  const added = cfg.targets[cfg.targets.length - 1];
+  expanded.add(added.id);
   renderTargets(cfg);
+  const card = $("targets").querySelector(`.target[data-id="${CSS.escape(added.id)}"]`);
+  card?.scrollIntoView({ behavior: "smooth", block: "center" });
+  card?.querySelector(".t_body input")?.focus({ preventScroll: true });
 }
 
 // Build the full config object from the current UI state. Shared by
@@ -913,19 +1003,44 @@ function collectConfigFromUI() {
   return cfg;
 }
 
-// "Unsaved changes" state. savedSignature is the signature of what's in
-// storage; whenever the UI signature differs, show the sticky save bar.
-// There is no separate Save button — the bar is the save affordance, and
-// it reappears automatically whenever the form drifts from saved.
+// "Unsaved changes" state (U11 hybrid model). Simple preferences auto-save
+// on change (saveGeneral); only target and custom-service edits go through
+// the sticky save bar, because saving targets may need a Chrome permission
+// prompt, which has to come from a click. savedSignature therefore covers
+// just those edits.
 let savedSignature = "";
 let savedFlashTimer = null;
 let flashing = false;
 
+function editsSignature(cfg) {
+  return settingsSignature({ targets: cfg.targets, customServices: cfg.customServices });
+}
+
+// U13: origins Chrome has already granted, so the save bar can say up
+// front which sites the Save click will ask about.
+let grantedOrigins = [];
+
+async function refreshGrantedOrigins() {
+  try {
+    grantedOrigins = (await chrome.permissions.getAll()).origins || [];
+  } catch {
+    grantedOrigins = [];
+  }
+  refreshDirty();
+}
+
 function refreshDirty() {
   const bar = $("savebar");
   if (!bar || savedSignature === "" || flashing) return;
-  const dirty = settingsSignature(collectConfigFromUI()) !== savedSignature;
+  const ui = collectConfigFromUI();
+  const dirty = editsSignature(ui) !== savedSignature;
   bar.classList.toggle("show", dirty);
+  if (!dirty) return;
+  const missing = missingOrigins(getOriginsFromTargets(ui), grantedOrigins)
+    .map(o => o.replace(/^https?:\/\//, "").replace(/\/\*$/, ""));
+  $("savebar_msg").textContent = missing.length
+    ? `Unsaved target changes — Chrome will ask to allow access to ${missing.join(", ")}`
+    : "Unsaved target changes";
 }
 
 // Briefly turn the save bar into a green "Saved" confirmation in place,
@@ -940,7 +1055,7 @@ function flashSaved() {
   savedFlashTimer = setTimeout(() => {
     flashing = false;
     bar.classList.remove("saved");
-    $("savebar_msg").textContent = "You have unsaved changes";
+    $("savebar_msg").textContent = "Unsaved target changes";
     refreshDirty();
   }, 1400);
 }
@@ -962,10 +1077,11 @@ async function save() {
     chrome.storage.local.set({ secrets })
   ]);
   window.__cfg = cfg;
-  savedSignature = settingsSignature(cfg);
+  savedSignature = editsSignature(cfg);
   flashSaved();
   chrome.runtime.sendMessage({ type: "CONFIG_UPDATED" });
-  revokeOrphanedPermissions(cfg);
+  await revokeOrphanedPermissions(cfg);
+  refreshGrantedOrigins();
 }
 
 function exportHooks() {
@@ -1048,6 +1164,11 @@ function exportHooks() {
       enabled: t.enabled !== false,
       reconcile: resolveReconcile(t)
     };
+  });
+
+  targets.forEach((x, i) => {
+    const name = String(sourceTargets[i]?.name || "").trim();
+    if (name) x.name = name;
   });
 
   const payload = {
@@ -1157,6 +1278,8 @@ async function importHooksFromFile(file) {
       applyTheme(cfg.theme || "light");
       $("include_meeting_url").checked = !!cfg.includeMeetingUrl;
     }
+    if (importedSettings) saveGeneral($("prefs_card"));
+    for (const t of normalizedTargets) expanded.add(t.id);
     cfg.targets = [...(cfg.targets || []), ...normalizedTargets];
     if (customServices.length > 0) {
       cfg.customServices = [...(cfg.customServices || []), ...customServices];
@@ -1167,7 +1290,8 @@ async function importHooksFromFile(file) {
     if (normalizedTargets.length > 0) parts.push(`${normalizedTargets.length} target(s)`);
     if (customServices.length > 0) parts.push(`${customServices.length} service(s)`);
     if (importedSettings) parts.push("trigger settings");
-    showStatus(`Imported ${parts.join(", ")}`);
+    const review = normalizedTargets.length || customServices.length ? " — review and Save" : "";
+    showStatus(`Imported ${parts.join(", ")}${review}`);
   } catch {
     showStatus("Invalid JSON file", false);
   }
@@ -1180,46 +1304,30 @@ document.addEventListener("input", refreshDirty);
 document.addEventListener("change", refreshDirty);
 
 $("add_custom_service").addEventListener("click", addCustomService);
-$("add_template").addEventListener("click", () => {
-  // The dropdown now covers both blank targets (formerly the "Add HTTP
-  // Hook" / "Add local Listener" buttons) and pre-filled templates; the
-  // pure resolveAddChoice tells us which action the selection maps to.
-  const choice = resolveAddChoice($("target_template").value, TEMPLATES);
-  if (choice.kind === "none") return showStatus("Pick something to add first", false);
-  if (choice.kind === "unknown") return showStatus("Unknown selection", false);
-  // Templates may carry a `target.type` other than httpHook (e.g.
-  // iotHybrid). Either way addTarget(type, templateKey?) picks the right
-  // branch; a blank choice has no templateKey.
-  addTarget(choice.type, choice.templateKey || "");
+// U6: one click per target type; templates live in "More templates…",
+// which adds as soon as you pick one.
+document.querySelectorAll(".addBtn").forEach(btn => {
+  btn.addEventListener("click", () => addTarget(btn.dataset.add, btn.dataset.template || ""));
+});
+$("target_template").addEventListener("change", e => {
+  const key = e.target.value;
+  e.target.value = "";
+  if (!TEMPLATES[key]) return;
+  addTarget(TEMPLATES[key].target?.type || "httpHook", key);
 });
 
-// Build the "Add a target…" <select> from BLANK_CHOICES + the TEMPLATES
-// object so adding an entry is a single-file change. Blanks go in their
-// own optgroup above the templates.
+// Build the "More templates…" <select> from the TEMPLATES object so
+// adding an entry is a single-file change.
 function populateTemplateDropdown() {
   const sel = $("target_template");
   if (!sel) return;
-  sel.innerHTML = '<option value="">Add a target…</option>';
-
-  const blanks = document.createElement("optgroup");
-  blanks.label = "Blank";
-  for (const [value, def] of Object.entries(BLANK_CHOICES)) {
-    const opt = document.createElement("option");
-    opt.value = value;
-    opt.textContent = def.label;
-    blanks.appendChild(opt);
-  }
-  sel.appendChild(blanks);
-
-  const tpls = document.createElement("optgroup");
-  tpls.label = "From template";
+  sel.innerHTML = '<option value="">More templates…</option>';
   for (const [key, def] of Object.entries(TEMPLATES)) {
     const opt = document.createElement("option");
     opt.value = key;
     opt.textContent = def.label || key;
-    tpls.appendChild(opt);
+    sel.appendChild(opt);
   }
-  sel.appendChild(tpls);
 }
 populateTemplateDropdown();
 
@@ -1253,21 +1361,59 @@ async function showBuildBadge() {
   }
 }
 
-// Theme is a personal display preference, not document content — apply
-// and persist it instantly on toggle so it never requires a Save (and so
-// it doesn't trip the unsaved-changes bar; see settingsSignature, which
-// excludes theme).
-async function persistTheme(theme) {
-  const { config } = await chrome.storage.sync.get({ config: DEFAULTS });
-  config.theme = theme;
-  await chrome.storage.sync.set({ config });
-  if (window.__cfg) window.__cfg.theme = theme;
+// ---- auto-saved preferences (U11) -------------------------------------
+// Services, trigger mode, icon, privacy, timeout and theme take effect the
+// moment they change — there's nothing to "review" before saving them.
+
+function readGeneralFromUI() {
+  return {
+    services: {
+      meet: $("svc_meet").checked,
+      teams: $("svc_teams").checked,
+      zoom: $("svc_zoom").checked
+    },
+    triggerMode: $("mode_select").value || "ANY_TAB",
+    timeoutSec: clampTimeoutSec($("http_timeout").value, 3),
+    iconMode: $("icon_mode").value || DEFAULTS.iconMode,
+    includeMeetingUrl: $("include_meeting_url").checked,
+    theme: $("theme_switch").checked ? "dark" : "light"
+  };
 }
 
+// Writes are chained so quick successive toggles land in order.
+let generalSaveChain = Promise.resolve();
+
+function saveGeneral(sourceEl) {
+  const general = readGeneralFromUI();
+  if (window.__cfg) Object.assign(window.__cfg, general);
+  generalSaveChain = generalSaveChain
+    .then(async () => {
+      const { config } = await chrome.storage.sync.get({ config: DEFAULTS });
+      await chrome.storage.sync.set({ config: { ...config, ...general } });
+      chrome.runtime.sendMessage({ type: "CONFIG_UPDATED" }).catch(() => {});
+      flashSavedCue(sourceEl);
+    })
+    .catch(() => showStatus("Couldn't save that change — try again", false));
+  return generalSaveChain;
+}
+
+// Brief "✓ Saved" next to the card heading the change came from.
+function flashSavedCue(el) {
+  const cue = el?.closest?.(".card")?.querySelector(".savedCue");
+  if (!cue) return;
+  cue.textContent = "✓ Saved";
+  cue.classList.add("show");
+  clearTimeout(cue._t);
+  cue._t = setTimeout(() => cue.classList.remove("show"), 1500);
+}
+
+document.querySelectorAll(".autosave").forEach(el => {
+  el.addEventListener("change", () => saveGeneral(el));
+});
+
 $("theme_switch").addEventListener("change", () => {
-  const theme = $("theme_switch").checked ? "dark" : "light";
-  applyTheme(theme);
-  persistTheme(theme);
+  applyTheme($("theme_switch").checked ? "dark" : "light");
+  saveGeneral($("theme_switch"));
 });
 
 function updateIconPreview() {
@@ -1289,7 +1435,7 @@ document.querySelectorAll(".timeout-pill").forEach(btn => {
   btn.addEventListener("click", () => {
     $("http_timeout").value = btn.dataset.val;
     updateTimeoutPills();
-    refreshDirty();
+    saveGeneral(btn);
   });
 });
 
@@ -1313,3 +1459,6 @@ async function initDiagnostics() {
 load();
 showBuildBadge();
 initDiagnostics();
+refreshGrantedOrigins();
+chrome.permissions.onAdded?.addListener(refreshGrantedOrigins);
+chrome.permissions.onRemoved?.addListener(refreshGrantedOrigins);

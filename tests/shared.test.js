@@ -27,8 +27,6 @@ import {
   resolveExportSecrets,
   exportFileName,
   formatBuildBadge,
-  BLANK_CHOICES,
-  resolveAddChoice,
   PAUSE_INDEFINITE,
   isPaused,
   pauseRemainingMs,
@@ -58,7 +56,16 @@ import {
   serviceMatchPatterns,
   originPatternsFor,
   orphanedOrigins,
-  importDestinations
+  importDestinations,
+  targetDisplayName,
+  targetHost,
+  describeTestResult,
+  summarizeDispatch,
+  describeDispatchHealth,
+  formatAgo,
+  describePausedState,
+  missingOrigins,
+  PAUSE_INDEFINITE as PAUSE_FOREVER
 } from "../extension/shared.js";
 
 // ---------------------------------------------------------------------------
@@ -417,35 +424,6 @@ describe("dev build badge: formatBuildBadge", () => {
     assert.equal(formatBuildBadge({ branch: "HEAD", commit: "abc" }, "0.3.7"), null); // detached (CI/tag)
     assert.equal(formatBuildBadge({ branch: "unknown", commit: "abc" }, "0.3.7"), null);
     assert.equal(formatBuildBadge({ branch: "", commit: "abc" }, "0.3.7"), null);
-  });
-});
-
-describe('"Add target" dropdown: resolveAddChoice', () => {
-  const templates = {
-    tasmota: { label: "Tasmota (GET)", target: { type: "httpHook" } },
-    aws_iot_hybrid: { label: "OnAir IoT", target: { type: "iotHybrid" } }
-  };
-
-  test("placeholder maps to a no-op", () => {
-    assert.deepEqual(resolveAddChoice("", templates), { kind: "none" });
-  });
-
-  test("blank choices add an empty target of the right type", () => {
-    assert.deepEqual(resolveAddChoice("__blank_httpHook", templates), { kind: "blank", type: "httpHook" });
-    assert.deepEqual(resolveAddChoice("__blank_listener", templates), { kind: "blank", type: "listener" });
-  });
-
-  test("template choices carry the template key and its target type", () => {
-    assert.deepEqual(resolveAddChoice("tasmota", templates), { kind: "template", templateKey: "tasmota", type: "httpHook" });
-    assert.deepEqual(resolveAddChoice("aws_iot_hybrid", templates), { kind: "template", templateKey: "aws_iot_hybrid", type: "iotHybrid" });
-  });
-
-  test("unrecognized values resolve to 'unknown'", () => {
-    assert.deepEqual(resolveAddChoice("does_not_exist", templates), { kind: "unknown" });
-  });
-
-  test("BLANK_CHOICES covers the two former add buttons", () => {
-    assert.deepEqual(Object.values(BLANK_CHOICES).map(c => c.type).sort(), ["httpHook", "listener"]);
   });
 });
 
@@ -924,6 +902,96 @@ describe("S5: import destinations", () => {
         { type: "httpHook", onUrl: "https://evil.example/on", offUrl: "" }
       ]),
       ["10.0.0.5", "api.aws.com", "evil.example"]
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UI helpers (U1, U3, U7, U8, U13)
+// ---------------------------------------------------------------------------
+
+describe("U7: target names and summaries", () => {
+  test("user name wins, else a readable type", () => {
+    assert.equal(targetDisplayName({ type: "simpleLed", name: "  Office sign " }), "Office sign");
+    assert.equal(targetDisplayName({ type: "httpHook", name: "" }), "HTTP hook");
+  });
+
+  test("targetHost picks the main URL and tolerates tokens", () => {
+    assert.equal(targetHost({ type: "listener", url: "http://127.0.0.1:8765/e?s={state}" }), "127.0.0.1:8765");
+    assert.equal(targetHost({ type: "httpHook", onUrl: "", offUrl: "https://ntfy.sh/t" }), "ntfy.sh");
+    assert.equal(targetHost({ type: "iotHybrid", cloudBase: "https://api.aws.com" }), "api.aws.com");
+    assert.equal(targetHost({ type: "simpleLed", baseUrl: "" }), "");
+  });
+
+  test("the name counts as an unsaved change", () => {
+    const a = { targets: [{ type: "simpleLed", baseUrl: "http://x", name: "A" }] };
+    const b = { targets: [{ type: "simpleLed", baseUrl: "http://x", name: "B" }] };
+    assert.notEqual(settingsSignature(a), settingsSignature(b));
+  });
+});
+
+describe("U8: describeTestResult", () => {
+  test("success and the common failure reasons", () => {
+    assert.deepEqual(describeTestResult({ ok: true, status: 200, via: "local", ms: 30 }), { ok: true, text: "Worked via local (HTTP 200) · 30 ms" });
+    assert.match(describeTestResult({ ok: false, error: "timeout" }).text, /timed out/);
+    assert.match(describeTestResult({ ok: false, status: 401 }).text, /check token/);
+    assert.match(describeTestResult({ ok: false, status: 500 }).text, /HTTP 500/);
+    assert.match(describeTestResult({ ok: false, skipped: true }).text, /fill in the URL/);
+    assert.match(describeTestResult({ ok: false, error: "Failed to fetch: redirect" }).text, /redirected/);
+    assert.equal(describeTestResult(null).ok, false);
+  });
+});
+
+describe("U1: dispatch health", () => {
+  const now = 1_000_000;
+
+  test("summarizeDispatch ignores skipped / noop / superseded results", () => {
+    const rec = summarizeDispatch([
+      { type: "simpleLed", name: "Sign", ok: true },
+      { type: "listener", ok: false, error: "timeout" },
+      { type: "httpHook", skipped: true },
+      { type: "iotHybrid", noop: true },
+      { type: "httpHook", ok: false, superseded: true }
+    ], "ON", now);
+    assert.deepEqual(rec, { ts: now, to: "ON", total: 2, failed: [{ name: "Listener", error: "timeout" }] });
+  });
+
+  test("health line reads like a status, not a count", () => {
+    assert.deepEqual(describeDispatchHealth(null, 0, now), { severity: "muted", text: "No targets set up" });
+    assert.deepEqual(describeDispatchHealth(null, 2, now), { severity: "muted", text: "2 targets ready" });
+    assert.deepEqual(
+      describeDispatchHealth({ ts: now - 12_000, total: 3, failed: [] }, 3, now),
+      { severity: "ok", text: "✓ All 3 targets updated 12s ago" }
+    );
+    assert.deepEqual(
+      describeDispatchHealth({ ts: now - 120_000, total: 2, failed: [{ name: "LED sign", error: "timeout" }, { name: "X", error: "HTTP 500" }] }, 2, now),
+      { severity: "warn", text: "⚠ LED sign failed — timeout (+1 more) · 2m ago" }
+    );
+  });
+
+  test("formatAgo", () => {
+    assert.equal(formatAgo(1000), "just now");
+    assert.equal(formatAgo(45_000), "45s ago");
+    assert.equal(formatAgo(3 * 60_000), "3m ago");
+    assert.equal(formatAgo(5 * 3600_000), "5h ago");
+    assert.equal(formatAgo(3 * 86400_000), "3d ago");
+  });
+});
+
+describe("U3: paused while in a meeting", () => {
+  const now = 1_000_000;
+  test("keeps the meeting visible and says the sign is held off", () => {
+    assert.equal(describePausedState({ until: PAUSE_FOREVER }, "meet", now), "In Google Meet · sign held off");
+    assert.equal(describePausedState({ until: now + 30 * 60_000 }, "zoom", now), "In Zoom · sign held off · 30m left");
+    assert.equal(describePausedState({ until: now + 30 * 60_000 }, null, now), "Paused · 30m left");
+  });
+});
+
+describe("U13: permissions still to be granted", () => {
+  test("only ungranted origins are listed", () => {
+    assert.deepEqual(
+      missingOrigins(["http://a/x", "https://b/y", "http://a/z"], ["http://a/*"]),
+      ["https://b/*"]
     );
   });
 });
