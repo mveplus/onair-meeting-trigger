@@ -4,6 +4,9 @@ Findings from the 2026-10-04 code review of the extension. Tick an item when
 it lands on `main` (note the PR). Work top-down within each section; IDs are
 stable so commits/PRs can reference them (e.g. `fix(S1): …`).
 
+**Status:** all items implemented — S1–S9, R1, P1–P8 merged in #18;
+U1–U13 in #19.
+
 ## Security
 
 - [x] **S1 — Template injection.** `{url}`/`{service}` are substituted raw into
@@ -71,32 +74,59 @@ stable so commits/PRs can reference them (e.g. `fix(S1): …`).
   concurrency. Serialize through an in-memory queue.
   *Done (wave 2, fix/review-security-speed): logActivity serialized via a promise chain.*
 
+## UI decisions (agreed 2026-10-04)
+
+- **Branch:** UI work lands on `feature/review-ui` (stacked on
+  `fix/review-security-speed`) as its own PR, so the security/speed PR isn't
+  held up by design review.
+- **U11 saving — hybrid:** simple toggles (services, trigger mode, theme, icon,
+  privacy, timeout) auto-save instantly with a small "✓ saved" cue; target and
+  custom-service edits keep the sticky save bar (saving targets may trigger
+  Chrome permission prompts, which need a click).
+- **U6 add target — button row:** `[ON-AIR sign] [LED] [Webhook] [Listener]`
+  plus a "More templates ▾" menu for the pre-filled templates.
+- **U7 target cards — collapsed summaries:** one line with name · host · status
+  and a Test button; click to expand. New targets open expanded.
+
 ## UI — popup
 
-- [ ] **U1 — Show last-dispatch health**, not "N targets active"
+- [x] **U1 — Show last-dispatch health**, not "N targets active"
   ("✓ Sign updated 5s ago" / "⚠ LED sign unreachable → Diagnostics").
-- [ ] **U2 — First-paint flash.** Cache last state + theme in `localStorage`
+  *Done (feature/review-ui): worker stores `lastDispatch` (summarizeDispatch) in storage.session; popup renders describeDispatchHealth with a Details link to diagnostics on failure.*
+- [x] **U2 — First-paint flash.** Cache last state + theme in `localStorage`
   for instant correct paint; read `config` once instead of three times.
-- [ ] **U3 — Paused during a meeting**: say both ("⏸ Paused · in Google Meet ·
+  *Done (feature/review-ui): popup paints from a localStorage cache (state + theme), then reconciles; one config read.*
+- [x] **U3 — Paused during a meeting**: say both ("⏸ Paused · in Google Meet ·
   sign held off").
-- [ ] **U4 — Copy/hierarchy:** "+1h" → "Extend 1h"; Settings becomes a small
+  *Done (feature/review-ui): worker reports `detected` service even while paused; describePausedState.*
+- [x] **U4 — Copy/hierarchy:** "+1h" → "Extend 1h"; Settings becomes a small
   gear link, Pause is the primary action.
+  *Done (feature/review-ui): Pause buttons are primary; "Extend 1h" adds to the remaining pause; Settings is a small footer link.*
 
 ## UI — settings
 
-- [ ] **U5 — Reorder:** Meeting detection (custom services folded in as
+- [x] **U5 — Reorder:** Meeting detection (custom services folded in as
   "+ Add another service") → Targets → Preferences → Diagnostics →
   Backup & restore.
-- [ ] **U6 — One-step add:** button row (ON-AIR sign / LED / Webhook /
+  *Done (feature/review-ui): order: detection (custom services folded in) → targets → preferences → diagnostics → backup & restore.*
+- [x] **U6 — One-step add:** button row (ON-AIR sign / LED / Webhook /
   Listener) or add on `<select>` change.
-- [ ] **U7 — Target names + collapsed summary rows**; drop the internal-id pill.
-- [ ] **U8 — Inline Test results with reason** (timeout / HTTP 401 /
+  *Done (feature/review-ui): add-button row + "More templates…" select that adds on pick.*
+- [x] **U7 — Target names + collapsed summary rows**; drop the internal-id pill.
+  *Done (feature/review-ui): `name` field (synced, exported, in settingsSignature); collapsed summary rows, expanded on add/import; id pill removed.*
+- [x] **U8 — Inline Test results with reason** (timeout / HTTP 401 /
   permission denied) next to the button, not the page-bottom status line.
-- [ ] **U9 — Move Import / Export / Include secrets** to a Backup & restore
+  *Done (feature/review-ui): Test result shown on the card via describeTestResult (timeout / 401 / redirect / HTTP n).*
+- [x] **U9 — Move Import / Export / Include secrets** to a Backup & restore
   section.
-- [ ] **U10 — Plain language:** "Reconcile behavior" → "Keep the sign in sync";
+  *Done (feature/review-ui): Backup & restore card.*
+- [x] **U10 — Plain language:** "Reconcile behavior" → "Keep the sign in sync";
   modes "1 (on)" → "On"/"Breathing"; drop the marketing subtitle.
-- [ ] **U11 — Consistent saving:** theme saves instantly, everything else via
+  *Done (feature/review-ui): "Keep the sign in sync"; modes On/Off/Breathing; subtitle removed; tighter copy.*
+- [x] **U11 — Consistent saving:** theme saves instantly, everything else via
   the save bar — auto-save simple toggles or route theme through the bar.
-- [ ] **U12 — Undo for Remove** ("Target removed · Undo" toast).
-- [ ] **U13 — Pre-explain permission prompts** before Chrome's dialog on Save.
+  *Done (feature/review-ui): hybrid: `.autosave` controls + theme + timeout save instantly (saveGeneral, "✓ Saved" cue); save bar tracks targets/custom services only (editsSignature).*
+- [x] **U12 — Undo for Remove** ("Target removed · Undo" toast).
+  *Done (feature/review-ui): Undo toast for target and custom-service removal; add/remove now preserve unsaved edits in other cards.*
+- [x] **U13 — Pre-explain permission prompts** before Chrome's dialog on Save.
+  *Done (feature/review-ui): save bar names the hosts Chrome will ask about (missingOrigins vs permissions.getAll).*

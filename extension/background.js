@@ -28,7 +28,9 @@ import {
   bodyEncodingFor,
   redirectPolicyFor,
   isRelevantTabUpdate,
-  serviceMatchPatterns
+  serviceMatchPatterns,
+  targetDisplayName,
+  summarizeDispatch
 } from "./shared.js";
 
 const LEGACY_DEFAULTS = {
@@ -108,6 +110,24 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 const OFF_STATE = { state: "OFF", service: null, url: null };
+
+// U3: the meeting service actually detected, even while paused forces the
+// sign OFF — so the popup can say "In Google Meet · sign held off".
+let detectedService = null;
+
+// U1: last time targets were actually sent to, for the popup's health
+// line. storage.session: in-memory, never synced, cleared on restart.
+const DISPATCH_KEY = "lastDispatch";
+
+async function recordDispatch(results, to) {
+  const rec = summarizeDispatch(results, to);
+  if (!rec.total) return;
+  try {
+    await stateStore().set({ [DISPATCH_KEY]: rec });
+  } catch {
+    // best effort
+  }
+}
 
 // ---- persisted runtime state (survives worker suspension) --------------
 // MV3 kills the service worker after ~30s idle; the `current` module
@@ -358,7 +378,7 @@ async function getPause() {
 // when no popup is open — that's expected, so swallow it.
 function broadcastState(pause) {
   chrome.runtime
-    .sendMessage({ type: "STATE_CHANGED", state: current.state, service: current.service, pause })
+    .sendMessage({ type: "STATE_CHANGED", state: current.state, service: current.service, detected: detectedService, pause })
     .catch(() => {});
 }
 
@@ -644,7 +664,7 @@ async function dispatchTarget(t, vars, timeoutSec, signal) {
   else if (t.type === "simpleLed") res = await runSimpleLedTarget(t, vars, timeoutSec, signal);
   else if (t.type === "httpHook") res = await runHttpHookTarget(t, vars, timeoutSec, signal);
   else if (t.type === "iotHybrid") res = await runIotHybridTarget(t, vars, timeoutSec, signal);
-  return { id: t.id, type: t.type, ...res, ms: Date.now() - t0 };
+  return { id: t.id, type: t.type, name: targetDisplayName(t), ...res, ms: Date.now() - t0 };
 }
 
 // Edge dispatch: a genuine ON<->OFF transition fires EVERY enabled target
@@ -669,6 +689,7 @@ async function applySideEffects(next, cfg, reason = "") {
   }
   const results = (await Promise.allSettled(jobs)).map(r => r.value).filter(Boolean);
   await iconJob;
+  await recordDispatch(results, next.state);
   await logActivity({ kind: "edge", reason, to: next.state, service: next.service || "", targets: results });
 }
 
@@ -726,6 +747,7 @@ async function reconcilePass(cfg, cur) {
   // Only log when something actually fired, so the log stays a signal of
   // remediations rather than a per-minute heartbeat of no-ops.
   if (results.some(r => r && !r.noop)) {
+    await recordDispatch(results, cur.state);
     await logActivity({ kind: "reconcile", reason: "alarm", to: cur.state, service: cur.service || "", targets: results });
   }
 }
@@ -738,8 +760,11 @@ async function tick(reason = "") {
   // worker compares against reality instead of the cold-start OFF default
   // (the fix for duplicate "in a meeting" pushes).
   await ensureCurrent();
-  // While paused, force OFF regardless of meeting tabs.
-  const next = isPaused(pause) ? { ...OFF_STATE } : await computeState(cfg);
+  // While paused, force OFF regardless of meeting tabs (but remember
+  // what was detected for the popup — U3).
+  const detected = await computeState(cfg);
+  detectedService = detected.service;
+  const next = isPaused(pause) ? { ...OFF_STATE } : detected;
 
   if (sameState(next, current)) {
     // Ensure icon is correct after SW wake (no-op once applied — P3)
@@ -758,7 +783,9 @@ async function tick(reason = "") {
     const cfg2 = await getConfig();
     const pause2 = await getPause();
     const prev = { ...current };
-    const next2 = isPaused(pause2) ? { ...OFF_STATE } : await computeState(cfg2);
+    const detected2 = await computeState(cfg2);
+    detectedService = detected2.service;
+    const next2 = isPaused(pause2) ? { ...OFF_STATE } : detected2;
     await commitCurrent(next2);
     // Re-check the edge after the debounce against what we last
     // dispatched: if it settled back, don't re-fire.
@@ -831,8 +858,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     if (msg?.type === "GET_STATE") {
       await ensureCurrent();
-      const pause = await getPause();
-      sendResponse({ state: current.state, service: current.service, pause });
+      const [pause, detected] = await Promise.all([getPause(), getConfig().then(computeState)]);
+      detectedService = detected.service;
+      sendResponse({ state: current.state, service: current.service, detected: detectedService, pause });
       return;
     }
     if (msg?.type === "CONFIG_UPDATED") {

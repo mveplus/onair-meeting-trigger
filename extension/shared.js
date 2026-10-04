@@ -697,30 +697,6 @@ export function exportFileName(includesSecrets) {
   return includesSecrets ? "onair-settings-with-secrets.json" : "onair-settings.json";
 }
 
-// ---- "Add target" dropdown choices ------------------------------------
-
-// Synthetic dropdown entries that add a blank target instead of a
-// pre-filled template — these fold the old "Add HTTP Hook" / "Add local
-// Listener" buttons into the single template <select>.
-export const BLANK_CHOICES = {
-  __blank_httpHook: { type: "httpHook", label: "Blank HTTP Hook" },
-  __blank_listener: { type: "listener", label: "Blank Listener" }
-};
-
-// Resolve a dropdown selection into an add action. Kinds:
-//   "none"     — placeholder selected, nothing to do
-//   "blank"    — add an empty target of `type`
-//   "template" — add `type` pre-filled from templates[templateKey]
-//   "unknown"  — value matched nothing (stale/garbage selection)
-export function resolveAddChoice(value, templates) {
-  if (!value) return { kind: "none" };
-  const blank = BLANK_CHOICES[value];
-  if (blank) return { kind: "blank", type: blank.type };
-  const tpl = templates?.[value];
-  if (!tpl) return { kind: "unknown" };
-  return { kind: "template", templateKey: value, type: tpl.target?.type || "httpHook" };
-}
-
 // ---- dev build badge ---------------------------------------------------
 
 // Format the "you're running an unpacked dev build" label from the git
@@ -790,7 +766,7 @@ export function describeMeetingState(state, service) {
 // ---- settings dirty detection -----------------------------------------
 
 function canonTarget(t) {
-  const base = { type: t.type, enabled: t.enabled !== false, reconcile: resolveReconcile(t) };
+  const base = { type: t.type, name: String(t.name || "").trim(), enabled: t.enabled !== false, reconcile: resolveReconcile(t) };
   if (t.type === "listener") return { ...base, url: t.url || "" };
   if (t.type === "simpleLed") return { ...base, baseUrl: t.baseUrl || "" };
   if (t.type === "iotHybrid") {
@@ -884,4 +860,107 @@ export function importDestinations(targets) {
     }
   }
   return [...hosts].sort();
+}
+
+// ---- target names & summaries (U7) ------------------------------------
+
+// What the user calls a target: their own name, else a readable type.
+export function targetDisplayName(t) {
+  const name = String(t?.name || "").trim();
+  return name || friendlyTargetType(t?.type);
+}
+
+// Host of the URL a target mainly talks to, for one-line summaries.
+// Template tokens are neutralized first so `…?s={state}` still parses.
+export function targetHost(t) {
+  const url = t?.type === "listener" ? t.url
+    : t?.type === "simpleLed" ? t.baseUrl
+    : t?.type === "iotHybrid" ? (t.localBase || t.cloudBase)
+    : (t?.onUrl || t?.offUrl);
+  if (!url) return "";
+  try {
+    return new URL(String(url).replace(/\{[a-z_]+\}/g, "x")).host;
+  } catch {
+    return "";
+  }
+}
+
+// ---- test results (U8) -------------------------------------------------
+
+// Plain-English outcome of an options-page Test (TEST_TARGET response).
+export function describeTestResult(res) {
+  if (!res) return { ok: false, text: "Failed — background worker didn't respond" };
+  if (res.ok) {
+    let text = "Worked";
+    if (res.via) text += ` via ${res.via}`;
+    if (res.status) text += ` (HTTP ${res.status})`;
+    if (typeof res.ms === "number") text += ` · ${res.ms} ms`;
+    return { ok: true, text };
+  }
+  if (res.skipped) return { ok: false, text: "Nothing sent — fill in the URL first" };
+  if (res.error === "timeout") return { ok: false, text: "No answer — timed out (is the device on and reachable?)" };
+  if (res.error && /redirect/i.test(res.error)) return { ok: false, text: "Failed — endpoint redirected (blocked because it carries a token)" };
+  if (res.status === 401 || res.status === 403) return { ok: false, text: `Rejected — HTTP ${res.status} (check token / password)` };
+  if (res.status) return { ok: false, text: `Failed — HTTP ${res.status}` };
+  if (res.error) return { ok: false, text: `Failed — ${res.error}` };
+  return { ok: false, text: "Failed — no URL for this state, or response didn't match" };
+}
+
+// ---- dispatch health for the popup (U1) --------------------------------
+
+// Compact record of the last time targets were actually sent to, stored
+// by the worker in storage.session for the popup.
+export function summarizeDispatch(results, to, now = Date.now()) {
+  const fired = (results || []).filter(r => r && !r.skipped && !r.noop && !r.superseded);
+  return {
+    ts: now,
+    to,
+    total: fired.length,
+    failed: fired.filter(r => r.ok === false)
+      .map(r => ({ name: r.name || friendlyTargetType(r.type), error: r.error || (r.status ? `HTTP ${r.status}` : "failed") }))
+  };
+}
+
+export function formatAgo(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+// One line answering "did my sign actually get the update?".
+export function describeDispatchHealth(last, enabledCount, now = Date.now()) {
+  if (!enabledCount) return { severity: "muted", text: "No targets set up" };
+  const ready = `${enabledCount} target${enabledCount === 1 ? "" : "s"} ready`;
+  if (!last || !last.total) return { severity: "muted", text: ready };
+  const ago = formatAgo(now - last.ts);
+  const failed = last.failed || [];
+  if (!failed.length) {
+    const what = last.total === 1 ? "Target" : `All ${last.total} targets`;
+    return { severity: "ok", text: `✓ ${what} updated ${ago}` };
+  }
+  const first = failed[0];
+  const more = failed.length > 1 ? ` (+${failed.length - 1} more)` : "";
+  return { severity: "warn", text: `⚠ ${first.name} failed — ${first.error}${more} · ${ago}` };
+}
+
+// Popup subline while paused: keep the meeting visible so it's clear the
+// sign is being held off on purpose (U3).
+export function describePausedState(pause, detectedService, now = Date.now()) {
+  const paused = describePause(pause, now) || "Paused";
+  if (!detectedService) return paused;
+  const left = paused.startsWith("Paused · ") ? paused.slice("Paused · ".length) : "";
+  return `${describeMeetingState("ON", detectedService)} · sign held off${left ? ` · ${left}` : ""}`;
+}
+
+// ---- permission pre-explain (U13) ---------------------------------------
+
+// Permission patterns the given URLs need that aren't granted yet.
+export function missingOrigins(urls, granted) {
+  const have = new Set(granted || []);
+  return originPatternsFor(urls).filter(o => !have.has(o));
 }

@@ -73,15 +73,23 @@ docs/, resources/  Documentation and store assets
   (`describeLogEntry`, `logSeverity`, `describeTargetLine`, `modeLabel`). The
   options page keeps only the toggle + open button, so settings stays uncluttered.
 - **Popup is status-first:** the worker broadcasts `STATE_CHANGED` and answers
-  `GET_STATE` with `{ state, service, pause }`; the popup renders a big
-  color-coded status card and a quick **Pause** control. Pause lives in
+  `GET_STATE` with `{ state, service, detected, pause }` (`detected` = the
+  meeting seen even while paused); the popup renders a big color-coded status
+  card, a health line from `lastDispatch` (storage.session, written after each
+  edge/remediation — `summarizeDispatch` / `describeDispatchHealth`) and Pause
+  controls. It paints first from a `localStorage` cache to avoid a flash. Pause lives in
   `chrome.storage.local` as `{ until }` (`PAUSE_INDEFINITE` or epoch-ms); while
   paused, `tick()` forces OFF. Pure helpers: `isPaused`, `describePause`,
   `describeMeetingState`, `countEnabledTargets`.
-- **Settings unsaved-changes bar:** `collectConfigFromUI()` builds the config
-  the same way `save()` does; `settingsSignature()` (pure, tested) compares it to
-  the saved baseline to drive a sticky save bar. Settings are grouped into
-  "Meeting detection" and a "Preferences" card (Appearance / Privacy / Advanced).
+- **Settings saving is hybrid:** controls marked `.autosave` (services,
+  trigger mode, icon, privacy), the timeout pills and the theme save instantly
+  via `saveGeneral()`. Only target/custom-service edits use the sticky save bar:
+  `editsSignature()` (targets + customServices through `settingsSignature`)
+  compares the form to the saved baseline, and the bar names hosts Chrome will
+  prompt for (`missingOrigins`). Target cards are collapsed summaries (`name` ·
+  host · status) expanded via the `expanded` id set. Card order: Meeting detection
+  (incl. custom services) → Targets → Preferences → Diagnostics → Backup &
+  restore. Page messages and Undo use the bottom `#toast` (`showStatus`).
 - **Dev build badge:** `scripts/gen-build-info.sh` writes the gitignored
   `extension/build-info.json` (commit/branch/dirty); `build-zip.sh` runs it
   before zipping. The popup and options page fetch it and render

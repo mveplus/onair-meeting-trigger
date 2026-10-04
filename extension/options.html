@@ -207,6 +207,7 @@
       background: var(--chip-bg);
       border-color: #2a4954;
     }
+    .serviceItem textarea { min-height: 48px; }
     .serviceItem {
       border:1px solid var(--border);
       border-radius: 12px;
@@ -439,6 +440,64 @@
       text-align: center;
       color: var(--muted);
     }
+    /* U7: collapsed target summaries */
+    .targetSummary {
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .targetSummary .chev {
+      border: none;
+      background: none;
+      padding: 4px;
+      font-size: 14px;
+      width: 28px;
+      color: var(--muted);
+      box-shadow: none;
+    }
+    .target.open .chev { transform: rotate(90deg); }
+    .targetSummary .t_title { font-weight: 700; cursor: pointer; }
+    .targetSummary .t_host { cursor: pointer; }
+    .targetSummary .spacer { flex: 1; }
+    .targetSummary input[type="checkbox"] { width: 16px; height: 16px; margin: 0; }
+    .target:not(.open) .t_details { display: none; }
+    .target.disabled .t_title, .target.disabled .t_host { opacity: 0.55; }
+    .t_details { margin-top: 10px; }
+    .t_result { font-size: 13px; margin-top: 6px; }
+    .t_result:empty { display: none; }
+    .t_result.ok { color: var(--ok-ink); }
+    .t_result.fail { color: var(--warn-ink); }
+    .t_result.busy { color: var(--muted); }
+    .detailFoot { display:flex; justify-content:space-between; align-items:center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+    button.small { padding: 6px 10px; font-size: 12px; border-radius: 10px; }
+    .addRow .addBtn { font-weight: 600; }
+    /* U11: transient "✓ Saved" cue for auto-saved preferences */
+    .savedCue { font-size: 12px; font-weight: 500; color: var(--ok-ink); margin-left: 8px; opacity: 0; transition: opacity 0.3s ease; }
+    .savedCue.show { opacity: 1; }
+    /* Toast (status + undo) */
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      transform: translate(-50%, 20px);
+      display:flex;
+      align-items:center;
+      gap: 12px;
+      max-width: min(640px, calc(100vw - 32px));
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--paper);
+      color: var(--ink);
+      box-shadow: var(--shadow);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      z-index: 10;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+    .toast.fail { border-color: var(--warn-border); background: var(--warn-bg); color: var(--warn-ink); }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     @media (max-width: 760px) {
@@ -466,42 +525,46 @@
           </label>
         </div>
       </div>
-      <p class="subtitle">Design your meeting signals, services, and automations in one place.</p>
       <code class="muted" id="build_badge" style="display:none; align-self:start;"
             title="Unpacked dev build — git branch @ commit"></code>
     </div>
 
     <div class="savebar" id="savebar">
       <span class="dot"></span>
-      <span id="savebar_msg">You have unsaved changes</span>
+      <span id="savebar_msg">Unsaved target changes</span>
       <span class="spacer"></span>
       <button class="primary" id="savebar_save">Save now</button>
     </div>
 
-    <div class="card">
-      <h2>Meeting detection</h2>
-      <p class="muted" style="margin:-4px 0 12px;">Turn the sign on when an open tab matches one of these services.</p>
+    <div class="card" id="detect_card">
+      <h2>Meeting detection <span class="savedCue" aria-live="polite"></span></h2>
+      <p class="muted" style="margin:-4px 0 12px;">Your sign turns on when an open tab matches one of these services.</p>
       <div class="checkGrid">
         <label class="checkItem">
-          <input type="checkbox" id="svc_meet">
+          <input type="checkbox" id="svc_meet" class="autosave">
           <span class="checkBox"></span>
           <span>Google Meet <span class="muted">(meet.google.com)</span></span>
         </label>
         <label class="checkItem">
-          <input type="checkbox" id="svc_teams">
+          <input type="checkbox" id="svc_teams" class="autosave">
           <span class="checkBox"></span>
           <span>Microsoft Teams <span class="muted">(teams.microsoft.com)</span></span>
         </label>
         <label class="checkItem">
-          <input type="checkbox" id="svc_zoom">
+          <input type="checkbox" id="svc_zoom" class="autosave">
           <span class="checkBox"></span>
           <span>Zoom <span class="muted">(zoom.us / app.zoom.us)</span></span>
         </label>
       </div>
+      <div id="custom_services"></div>
+      <div class="btns" style="margin-top:10px;">
+        <button id="add_custom_service">+ Add another service</button>
+        <span class="muted">Any site, by URL prefix — e.g. <code>https://webex.com/meet/</code></span>
+      </div>
       <div class="triggerRow" style="margin-top:12px;">
         <label style="margin:0; display:flex; align-items:center; gap:10px;">
           <span>Trigger when</span>
-          <select id="mode_select" class="selectButton modeSelect">
+          <select id="mode_select" class="selectButton modeSelect autosave">
             <option value="ANY_TAB">Any matching tab is open</option>
             <option value="ACTIVE_TAB">Only the active tab matches</option>
           </select>
@@ -509,43 +572,43 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="triggerRow">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <h2>Custom Services</h2>
-        </div>
-        <div style="display:flex; align-items:center; gap:10px;">
-          <button id="add_custom_service" class="actionCtrl">Add</button>
-          <span class="muted">Add your own meeting service by URL prefix (include scheme, trailing slash recommended).</span>
-        </div>
+    <div class="card" id="targets_card">
+      <h2>Targets</h2>
+      <p class="muted" style="margin:-4px 0 12px;">What to switch when a meeting starts or ends.</p>
+      <div class="btns addRow">
+        <span class="muted">Add:</span>
+        <button class="addBtn" data-add="iotHybrid" data-template="aws_iot_hybrid">ON-AIR sign</button>
+        <button class="addBtn" data-add="simpleLed">LED</button>
+        <button class="addBtn" data-add="httpHook">Webhook</button>
+        <button class="addBtn" data-add="listener">Listener</button>
+        <select id="target_template" class="selectButton compact" aria-label="Add from a template">
+          <option value="">More templates…</option>
+        </select>
       </div>
-      <div id="custom_services"></div>
+      <div id="targets"></div>
     </div>
 
     <div class="card" id="prefs_card">
-      <h2>Preferences</h2>
-
+      <h2>Preferences <span class="savedCue" aria-live="polite"></span></h2>
       <div class="prefRow">
         <div class="prefLabel"><b>Appearance</b><span class="muted">Toolbar icon</span></div>
         <label style="margin:0;" class="iconPicker">
           <img id="icon_preview" class="iconPreview" alt="Icon preview" src="icons/icon48.png" />
-          <select id="icon_mode" class="selectButton">
+          <select id="icon_mode" class="selectButton autosave">
             <option value="alwaysColor">Always color</option>
             <option value="state">Color = ON / Gray = OFF</option>
           </select>
         </label>
       </div>
-
       <div class="prefRow">
         <div class="prefLabel"><b>Privacy</b><span class="muted">Meeting URL</span></div>
         <label class="checkItem" style="margin:0;">
-          <input type="checkbox" id="include_meeting_url">
+          <input type="checkbox" id="include_meeting_url" class="autosave">
           <span class="checkBox"></span>
           <span>Include the full meeting URL (with meeting ID) in requests</span>
         </label>
         <span class="infoTip wide" tabindex="0" data-tip="When a target uses the {url} token, this sets how much of the meeting link it receives — and it's only ever sent to the endpoints you set up, never to anyone else. Off (default): just the site, e.g. https://meet.google.com — which app you're in, not which meeting. On: the full link, including the part that lets someone join.">?</span>
       </div>
-
       <div class="prefRow">
         <div class="prefLabel"><b>Advanced</b><span class="muted">Request timeout</span></div>
         <div class="pillGroup">
@@ -559,33 +622,8 @@
     </div>
 
     <div class="card">
-      <h2>Targets</h2>
-      <p class="muted" style="margin:-4px 0 12px;">What to drive when a meeting is detected — your ON-AIR sign, an LED, a webhook, or any HTTP endpoint on your LAN or in the cloud.</p>
-      <div class="btns">
-        <select id="target_template" class="selectButton compact">
-          <option value="">Add a target…</option>
-          <!-- Blank-target and template options are appended at runtime by
-               populateTemplateDropdown() in options.js (BLANK_CHOICES +
-               the TEMPLATES object are the single source of truth). -->
-        </select>
-        <button id="add_template">Add</button>
-        <button id="import_hooks">Import Settings</button>
-        <input type="file" id="import_hooks_file" accept="application/json" style="display:none" />
-        <button id="export_hooks">Export Settings</button>
-        <label class="checkItem" style="margin:0;"
-               title="Off (default): tokens/passwords are stripped from the exported file. On: they are written in plaintext — keep the file private.">
-          <input type="checkbox" id="export_secrets">
-          <span class="checkBox"></span>
-          <span>Include secrets</span>
-        </label>
-      </div>
-
-      <div id="targets"></div>
-    </div>
-
-    <div class="card">
       <h2>Diagnostics</h2>
-      <p class="muted" style="margin:-4px 0 12px;">The service worker sleeps aggressively, so live console logs are unreliable — turn this on to record a persistent, human-readable activity trail instead.</p>
+      <p class="muted" style="margin:-4px 0 12px;">Something not switching? Turn on logging, reproduce it, then open the log.</p>
       <label class="checkItem" style="margin:0 0 12px;"
              title="Records every state change and reconcile action to a rolling log.">
         <input type="checkbox" id="debug_logs">
@@ -595,13 +633,29 @@
       <div class="btns">
         <button id="open_diagnostics">Open diagnostics…</button>
       </div>
-      <p class="muted" style="margin:10px 0 0;">Opens the live log in a new tab. It's also available as an <b>ON-AIR</b> panel in Chrome DevTools.</p>
+      <p class="muted" style="margin:10px 0 0;">Also available as an <b>ON-AIR</b> panel in Chrome DevTools.</p>
     </div>
 
-    <div class="btns" style="min-height:20px;">
-      <span class="status" id="status"></span>
+    <div class="card" id="backup_card">
+      <h2>Backup &amp; restore</h2>
+      <p class="muted" style="margin:-4px 0 12px;">Move your settings to another browser, or share a setup.</p>
+      <div class="btns">
+        <button id="export_hooks">Export settings</button>
+        <label class="checkItem" style="margin:0;"
+               title="Off (default): tokens/passwords are stripped from the exported file. On: they are written in plaintext — keep the file private.">
+          <input type="checkbox" id="export_secrets">
+          <span class="checkBox"></span>
+          <span>Include secrets</span>
+        </label>
+        <button id="import_hooks">Import settings…</button>
+        <input type="file" id="import_hooks_file" accept="application/json" style="display:none" />
+      </div>
     </div>
 
+    <div class="toast" id="toast" role="status" aria-live="polite">
+      <span id="toast_msg"></span>
+      <button id="toast_action" class="small" hidden></button>
+    </div>
     <script type="module" src="options.js"></script>
   </div>
 </body>
