@@ -90,6 +90,32 @@ docs/, resources/  Documentation and store assets
   installs render nothing). Run `scripts/gen-build-info.sh` after switching
   branches to refresh it.
 
+- **Edge cancellation + caching (background.js):** each meeting edge owns an
+  `AbortController` (`edgeAbort`); a new edge aborts the previous edge's
+  in-flight requests and retries so an older ON can't land after a newer OFF
+  (results tagged `superseded`). Config is cached in memory (`cfgCache`,
+  invalidated by `storage.onChanged` + `CONFIG_UPDATED`); `current` hydrates
+  once per worker (`ensureCurrent`) and is only persisted when it changes.
+  `tabs.onUpdated` is filtered by `isRelevantTabUpdate`.
+- **Template escaping:** `applyTemplate(str, vars, encode)` — URLs use `"url"`
+  (encodeURIComponent), JSON bodies `"json"` (`bodyEncodingFor`); `{url_raw}`
+  is the unescaped escape hatch. Credentialed requests use
+  `redirectPolicyFor` → `redirect: "error"`.
+- **Secret detection** is by pattern, not a fixed list: `isSecretHeader`
+  (auth/token/key/secret/cookie/session/passw) and `urlCarriesSecret`
+  (secret query params, userinfo, HA/Slack/Discord/IFTTT webhook URLs). Secret
+  URLs (`listener.url`, `httpHook.onUrl/offUrl`) are split into
+  `secrets[id].urls`; `loadConfig` moves any secrets it finds in sync to local.
+- **Options Test buttons** send `TEST_TARGET` to the worker, which runs the
+  live `dispatchTarget` — there is no separate test executor in options.js.
+  The worker ignores messages whose `sender.id` isn't this extension.
+
+## Open review backlog
+
+`docs/REVIEW-BACKLOG.md` tracks the 2026-10 security / speed / UI review
+(IDs S1–S9, R1, P1–P8, U1–U13). Tick items there as they land; reference the
+ID in commit messages.
+
 ## Tests
 
 ```bash

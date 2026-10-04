@@ -107,6 +107,7 @@ const SEVERITY_RANK = { info: 0, muted: 1, ok: 2, warn: 3, error: 4 };
 // Severity of a single target outcome within a log entry.
 export function targetSeverity(t) {
   if (!t) return "muted";
+  if (t.superseded) return "muted"; // cancelled by a newer edge — expected
   if (t.ok === false) return "error";
   if (t.action === "remediate" || t.drift === true) return "warn";
   if (t.noop) return "muted";
@@ -130,7 +131,9 @@ export function describeTargetLine(t) {
   const name = friendlyTargetType(t?.type);
   const severity = targetSeverity(t);
   let text;
-  if (t?.ok === false) {
+  if (t?.superseded) {
+    text = `${name} cancelled — superseded by a newer change`;
+  } else if (t?.ok === false) {
     text = `${name} failed`;
     if (t.status) text += ` (HTTP ${t.status})`;
     if (t.error) text += ` — ${t.error}`;
@@ -224,7 +227,42 @@ export function parseCloudStateMode(payload) {
 
 // Header keys we treat as credentials: kept out of synced storage and
 // redacted from exported settings (see extractSecrets / redactSecrets).
+// The explicit list is kept for reference; S4 widened detection to any
+// header whose name looks credential-bearing (X-Api-Key, Cookie, …).
 export const SECRET_HEADER_KEYS = ["authorization", "x-api-token"];
+const SECRET_HEADER_RE = /auth|token|key|secret|cookie|session|passw/i;
+
+export function isSecretHeader(key) {
+  const k = String(key || "").trim();
+  return !!k && (SECRET_HEADER_KEYS.includes(k.toLowerCase()) || SECRET_HEADER_RE.test(k));
+}
+
+// S4: URLs that are themselves credentials — a secret-looking query param,
+// userinfo (user:pass@), or a well-known "the URL is the key" webhook
+// (Home Assistant, Slack, Discord, IFTTT). Such URLs are kept out of sync
+// storage and exports like any other token.
+const SECRET_PARAM_RE = /^(token|access[_-]?token|auth|authorization|key|api[_-]?key|apikey|secret|client[_-]?secret|password|pass|pwd|sig|signature)$/i;
+const SECRET_URL_PATTERNS = [
+  /\/api\/webhook\/[^/?#]+/i,                         // Home Assistant
+  /^https?:\/\/hooks\.slack\.com\/services\//i,
+  /^https?:\/\/(?:\w+\.)?discord(?:app)?\.com\/api\/webhooks\//i,
+  /^https?:\/\/maker\.ifttt\.com\/trigger\/.+\/key\//i
+];
+
+export function urlCarriesSecret(url) {
+  const s = String(url || "").trim();
+  if (!s) return false;
+  if (SECRET_URL_PATTERNS.some(re => re.test(s))) return true;
+  let u;
+  // Templates may contain {tokens}; they don't affect the checks below.
+  try { u = new URL(s); } catch { return false; }
+  if (u.username || u.password) return true;
+  for (const k of u.searchParams.keys()) if (SECRET_PARAM_RE.test(k)) return true;
+  return false;
+}
+
+// URL fields per target type that may hold a URL-borne secret.
+const URL_SECRET_FIELDS = { listener: ["url"], httpHook: ["onUrl", "offUrl"] };
 
 export function trimSlash(s) {
   return (s || "").replace(/\/+$/, "");
@@ -258,12 +296,37 @@ export function backoffMs(attempt) {
   return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** attempt));
 }
 
-export function applyTemplate(str, vars = {}) {
+export const TEMPLATE_TOKENS = ["{state}", "{service}", "{url}", "{url_raw}", "{ts}"];
+
+// Escape a substituted value for the context it lands in (S1):
+//   "url"  — encodeURIComponent, so a meeting link like `…?a=1&state=OFF`
+//            can't inject extra query params into the user's hook URL
+//   "json" — JSON string escaping, so quotes can't break out of a body
+//   "none" — raw (plain-text bodies, legacy callers)
+function encodeTemplateValue(v, encode) {
+  const s = String(v ?? "");
+  if (encode === "url") return encodeURIComponent(s);
+  if (encode === "json") return JSON.stringify(s).slice(1, -1);
+  return s;
+}
+
+// `{url_raw}` is the escape hatch: always substituted verbatim, for users
+// who deliberately want the unencoded meeting URL in a template.
+export function applyTemplate(str, vars = {}, encode = "none") {
+  const enc = v => encodeTemplateValue(v, encode);
   return String(str ?? "")
-    .replaceAll("{state}", vars.state ?? "")
-    .replaceAll("{service}", vars.service ?? "")
-    .replaceAll("{url}", vars.url ?? "")
-    .replaceAll("{ts}", String(vars.ts ?? ""));
+    .replaceAll("{state}", enc(vars.state))
+    .replaceAll("{service}", enc(vars.service))
+    .replaceAll("{url_raw}", String(vars.url ?? ""))
+    .replaceAll("{url}", enc(vars.url))
+    .replaceAll("{ts}", enc(vars.ts));
+}
+
+// Pick the escaping for a request body template: JSON-looking bodies get
+// JSON escaping, anything else (form / plain text) is left raw.
+export function bodyEncodingFor(bodyTpl) {
+  const s = String(bodyTpl ?? "").trim();
+  return s.startsWith("{") || s.startsWith("[") ? "json" : "none";
 }
 
 // ---- service matching --------------------------------------------------
@@ -285,12 +348,62 @@ export function getServiceMatchers(cfg) {
   return [...custom, ...builtIns];
 }
 
+// S6: a prefix matches only on the exact origin, then by path prefix — a
+// bare string prefix let `https://webex.com` match
+// `https://webex.com.evil.io/`. Unparseable prefixes never match.
+const parsedPrefixCache = new Map();
+function parsePrefix(p) {
+  if (!parsedPrefixCache.has(p)) {
+    let v = null;
+    try {
+      const u = new URL(p);
+      v = { origin: u.origin, rest: u.pathname + u.search };
+    } catch { /* invalid prefix */ }
+    if (parsedPrefixCache.size > 256) parsedPrefixCache.clear();
+    parsedPrefixCache.set(p, v);
+  }
+  return parsedPrefixCache.get(p);
+}
+
+export function urlMatchesPrefix(url, prefix) {
+  const p = parsePrefix(prefix);
+  if (!p) return false;
+  let u;
+  try { u = new URL(url); } catch { return false; }
+  return u.origin === p.origin && (u.pathname + u.search).startsWith(p.rest);
+}
+
 export function matchService(url, cfg) {
   if (!url) return null;
   for (const svc of getServiceMatchers(cfg)) {
-    if (svc.prefixes.some(p => url.startsWith(p))) return svc.key;
+    if (svc.prefixes.some(p => urlMatchesPrefix(url, p))) return svc.key;
   }
   return null;
+}
+
+// P4: Chrome match patterns for the enabled service prefixes, so the
+// worker can ask tabs.query for matching tabs instead of listing them
+// all. Returns null when any prefix can't be expressed as a pattern
+// (port, query string) — the caller then falls back to querying all tabs.
+// Results are still re-checked with matchService, so semantics don't change.
+export function prefixToMatchPattern(prefix) {
+  let u;
+  try { u = new URL(prefix); } catch { return null; }
+  if (!/^https?:$/.test(u.protocol) || u.port || u.search || u.hash || u.username) return null;
+  if (/[*]/.test(u.hostname + u.pathname)) return null;
+  return `${u.protocol}//${u.hostname}${u.pathname}*`;
+}
+
+export function serviceMatchPatterns(cfg) {
+  const out = new Set();
+  for (const svc of getServiceMatchers(cfg)) {
+    for (const p of svc.prefixes) {
+      const pat = prefixToMatchPattern(p);
+      if (!pat) return null;
+      out.add(pat);
+    }
+  }
+  return [...out];
 }
 
 // ---- normalization -----------------------------------------------------
@@ -337,8 +450,8 @@ function defaultNewId(prefix = "t") {
 export function buildListenerUrl(rawUrl, vars = {}) {
   const url = String(rawUrl || "").trim();
   if (!url) return null;
-  const hasToken = ["{state}", "{service}", "{url}", "{ts}"].some(tok => url.includes(tok));
-  if (hasToken) return applyTemplate(url, vars);
+  const hasToken = TEMPLATE_TOKENS.some(tok => url.includes(tok));
+  if (hasToken) return applyTemplate(url, vars, "url");
   let u;
   try { u = new URL(url); } catch { return null; }
   u.searchParams.set("state", vars.state ?? "");
@@ -387,19 +500,47 @@ export function httpHookSuccess(target, state, response) {
 
 // ---- endpoint security warnings (Fix 2) -------------------------------
 
+// S2: IP ranges are only checked against real IP literals — a prefix test
+// on the hostname string let `10.evil.com` / `192.168.attacker.net` pass
+// as LAN and silenced the cleartext-token warning.
+function isPrivateIPv4(host) {
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return null; // not an IPv4 literal
+  const [a, b] = [+m[1], +m[2]];
+  return a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254) ||            // link-local
+    (a === 100 && b >= 64 && b <= 127);    // CGNAT / Tailscale
+}
+
+function isPrivateIPv6(host) {
+  if (!host.startsWith("[") || !host.endsWith("]")) return null; // not IPv6
+  const h = host.slice(1, -1);
+  if (h === "::1") return true;
+  // IPv4-mapped; the URL parser normalizes it to hex (::ffff:c0a8:101).
+  const mapped = h.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mapped) {
+    const hi = parseInt(mapped[1], 16), lo = parseInt(mapped[2], 16);
+    return isPrivateIPv4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`) === true;
+  }
+  return /^f[cd][0-9a-f]{0,2}:/.test(h) || /^fe[89ab][0-9a-f]?:/.test(h); // ULA, link-local
+}
+
 export function isPrivateHost(url) {
   let host;
   try { host = new URL(url).hostname; } catch { return false; }
   if (!host) return false;
   host = host.toLowerCase();
-  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".lan")) return true;
-  if (!host.includes(".")) return true; // bare hostname, assume LAN
-  if (host === "127.0.0.1" || host.startsWith("127.")) return true;
-  if (host.startsWith("10.")) return true;
-  if (host.startsWith("192.168.")) return true;
-  const m = host.match(/^172\.(\d+)\./);
-  if (m) { const o = +m[1]; if (o >= 16 && o <= 31) return true; }
-  return false;
+  const v6 = isPrivateIPv6(host);
+  if (v6 !== null) return v6;
+  const v4 = isPrivateIPv4(host);
+  if (v4 !== null) return v4;
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (host.endsWith(".local") || host.endsWith(".lan") ||
+      host.endsWith(".home.arpa") || host.endsWith(".internal")) return true;
+  return !host.includes("."); // bare hostname, assume LAN
 }
 
 function isCleartext(url) {
@@ -412,7 +553,7 @@ function isCleartext(url) {
 export function endpointSecurityWarnings(target) {
   const warnings = [];
   const flag = (url, hasToken, label) => {
-    if (!url || !hasToken) return;
+    if (!url || !(hasToken || urlCarriesSecret(url))) return;
     if (isCleartext(url) && !isPrivateHost(url)) {
       warnings.push(`${label} sends a token over plain HTTP — use HTTPS`);
     }
@@ -422,17 +563,34 @@ export function endpointSecurityWarnings(target) {
     flag(target.localBase, hasText(target.localToken), "Local endpoint");
   } else if (target?.type === "httpHook") {
     const hasAuthHeader = (target.headers || [])
-      .some(h => SECRET_HEADER_KEYS.includes(String(h?.key || "").toLowerCase()) && hasText(h?.value));
+      .some(h => isSecretHeader(h?.key) && hasText(h?.value));
     const hasBasic = !!(target.basicAuth && (target.basicAuth.user || target.basicAuth.pass));
     const hasToken = hasAuthHeader || hasBasic;
     flag(target.onUrl, hasToken, "ON URL");
     flag(target.offUrl, hasToken, "OFF URL");
+  } else if (target?.type === "listener") {
+    flag(target.url, false, "Listener URL");
   }
   return warnings;
 }
 
 function hasText(s) {
   return typeof s === "string" && s.trim() !== "";
+}
+
+// S3: fetch strips only `Authorization` on a cross-origin redirect, so a
+// custom credential header (X-API-Token, …) would follow a redirect to
+// whatever host the endpoint points at. Refuse redirects on any request
+// that carries credentials; credential-free hooks keep following them.
+export function redirectPolicyFor(target) {
+  if (target?.type === "iotHybrid") return "error"; // always token-bearing APIs
+  if (target?.type === "httpHook") {
+    const hasHeaderCred = (target.headers || [])
+      .some(h => isSecretHeader(h?.key) && hasText(h?.value));
+    const hasBasic = !!(target.basicAuth && (target.basicAuth.user || target.basicAuth.pass));
+    return hasHeaderCred || hasBasic ? "error" : "follow";
+  }
+  return "follow";
 }
 
 // ---- secret splitting (Fix 1) -----------------------------------------
@@ -463,9 +621,16 @@ export function extractSecrets(cfg) {
       const hs = {};
       for (const h of t.headers || []) {
         const k = String(h.key || "").toLowerCase();
-        if (SECRET_HEADER_KEYS.includes(k) && hasText(h.value)) { hs[k] = h.value; h.value = ""; }
+        if (isSecretHeader(k) && hasText(h.value)) { hs[k] = h.value; h.value = ""; }
       }
       if (Object.keys(hs).length) s.headers = hs;
+    }
+    // S4: whole URLs that are credentials (webhook keys, ?token=…).
+    for (const f of URL_SECRET_FIELDS[t.type] || []) {
+      if (urlCarriesSecret(t[f])) {
+        (s.urls ||= {})[f] = t[f];
+        t[f] = "";
+      }
     }
     if (Object.keys(s).length) secrets[t.id] = s;
   }
@@ -494,6 +659,9 @@ export function applySecrets(cfg, secrets = {}) {
           if (s.headers[k] && !hasText(h.value)) h.value = s.headers[k];
         }
       }
+    }
+    for (const [f, v] of Object.entries(s.urls || {})) {
+      if ((URL_SECRET_FIELDS[t.type] || []).includes(f) && !hasText(t[f])) t[f] = v;
     }
   }
   return merged;
@@ -664,4 +832,56 @@ export function settingsSignature(cfg) {
     targets: (c.targets || []).map(canonTarget)
   };
   return JSON.stringify(canon);
+}
+
+// ---- tab event filtering (P1) -------------------------------------------
+
+// tabs.onUpdated fires for every title/favicon/audible/loading change on
+// every tab. Only a URL change (incl. SPA navigation) or a finished load
+// can change which meeting service matches.
+export function isRelevantTabUpdate(changeInfo) {
+  return changeInfo?.url !== undefined || changeInfo?.status === "complete";
+}
+
+// ---- host permissions (P7 / S8) ----------------------------------------
+
+// `scheme://host[:port]/*` permission pattern for a URL (same shape the
+// options page has always requested), or null if unparseable.
+export function originPatternFor(url) {
+  try {
+    const u = new URL(String(url).replace(/\{[a-z_]+\}/g, "x"));
+    if (!/^https?:$/.test(u.protocol)) return null;
+    return `${u.protocol}//${u.host}/*`;
+  } catch {
+    return null;
+  }
+}
+
+// Deduplicated permission patterns for a list of URLs (one prompt — P7).
+export function originPatternsFor(urls) {
+  return [...new Set((urls || []).map(originPatternFor).filter(Boolean))];
+}
+
+// S8: granted origins that no target uses any more. Only http(s) site
+// patterns are candidates; anything else (e.g. a broad grant) is left alone.
+export function orphanedOrigins(granted, keepPatterns) {
+  const keep = new Set(keepPatterns || []);
+  return (granted || []).filter(o =>
+    /^https?:\/\/[^*/]+\/\*$/.test(o) && !keep.has(o)
+  );
+}
+
+// ---- import review (S5) -------------------------------------------------
+
+// Hosts an imported set of targets would send requests to, for the
+// confirmation shown before an import is applied.
+export function importDestinations(targets) {
+  const hosts = new Set();
+  const add = u => { try { hosts.add(new URL(String(u).replace(/\{[a-z_]+\}/g, "x")).host); } catch { /* skip */ } };
+  for (const t of targets || []) {
+    for (const f of ["url", "onUrl", "offUrl", "baseUrl", "localBase", "cloudBase"]) {
+      if (t?.[f]) add(t[f]);
+    }
+  }
+  return [...hosts].sort();
 }

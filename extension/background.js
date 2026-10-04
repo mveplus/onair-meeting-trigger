@@ -24,7 +24,11 @@ import {
   migrateReconcile,
   parseDeviceMode,
   reconcileDrift,
-  parseCloudStateMode
+  parseCloudStateMode,
+  bodyEncodingFor,
+  redirectPolicyFor,
+  isRelevantTabUpdate,
+  serviceMatchPatterns
 } from "./shared.js";
 
 const LEGACY_DEFAULTS = {
@@ -80,6 +84,11 @@ let current = { state: "OFF", service: null, url: null, ts: Date.now() };
 let debounceTimer = null;
 let debugEnabled = false;
 
+// R1: one AbortController per meeting edge. A new edge aborts the previous
+// edge's in-flight requests and pending retries, so a retrying ON can't
+// land after a later OFF and leave the sign stuck ON.
+let edgeAbort = new AbortController();
+
 function debugLog(...args) {
   if (!debugEnabled) return;
   console.debug("[ON-AIR]", ...args);
@@ -93,8 +102,9 @@ chrome.storage.local.get({ debugLogs: false }).then(({ debugLogs }) => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes.debugLogs) return;
-  debugEnabled = !!changes.debugLogs.newValue;
+  if (area === "local" && changes.debugLogs) debugEnabled = !!changes.debugLogs.newValue;
+  // P2: drop the cached config whenever either half of it changes.
+  if ((area === "sync" && changes.config) || (area === "local" && changes.secrets)) cfgCache = null;
 });
 
 const OFF_STATE = { state: "OFF", service: null, url: null };
@@ -131,6 +141,27 @@ async function saveCurrent(state) {
   }
 }
 
+// P3: hydrate `current` from storage once per worker lifetime. After that
+// this worker is the only writer, so the in-memory copy is authoritative.
+// Memoized as a promise so concurrent ticks can't re-hydrate a stale value
+// over one another.
+let currentReady = null;
+function ensureCurrent() {
+  if (!currentReady) {
+    currentReady = loadCurrent().then(h => {
+      if (h) current = { ...h, ts: Date.now() };
+    });
+  }
+  return currentReady;
+}
+
+// Update `current`, persisting only when it actually changed.
+async function commitCurrent(next) {
+  const changed = next.state !== current.state || next.service !== current.service || next.url !== current.url;
+  current = { state: next.state, service: next.service, url: next.url, ts: Date.now() };
+  if (changed) await saveCurrent(current);
+}
+
 // ---- diagnostics activity log (ring buffer) ----------------------------
 // Persistent, structured event trail the options page can render. MV3
 // console logs are near-useless here because the worker keeps dying;
@@ -139,16 +170,25 @@ async function saveCurrent(state) {
 const LOG_KEY = "activityLog";
 const LOG_MAX = 200;
 
-async function logActivity(entry) {
-  if (!debugEnabled) return;
-  try {
-    const { [LOG_KEY]: log = [] } = await chrome.storage.local.get({ [LOG_KEY]: [] });
-    log.push({ ts: Date.now(), ...entry });
-    const trimmed = log.length > LOG_MAX ? log.slice(log.length - LOG_MAX) : log;
-    await chrome.storage.local.set({ [LOG_KEY]: trimmed });
-  } catch {
-    // best effort
-  }
+// P8: writes are serialized through a promise chain — concurrent
+// read-modify-write cycles (edge + worker-start + reconcile) used to
+// overwrite each other and drop entries.
+let logChain = Promise.resolve();
+
+function logActivity(entry) {
+  if (!debugEnabled) return Promise.resolve();
+  const record = { ts: Date.now(), ...entry };
+  logChain = logChain.then(async () => {
+    try {
+      const { [LOG_KEY]: log = [] } = await chrome.storage.local.get({ [LOG_KEY]: [] });
+      log.push(record);
+      const trimmed = log.length > LOG_MAX ? log.slice(log.length - LOG_MAX) : log;
+      await chrome.storage.local.set({ [LOG_KEY]: trimmed });
+    } catch {
+      // best effort
+    }
+  });
+  return logChain;
 }
 
 function newId(prefix = "t") {
@@ -245,24 +285,36 @@ function migrateConfig(config) {
   };
 }
 
+// P2: config cache, invalidated by storage.onChanged and CONFIG_UPDATED.
+// Callers treat the returned object as read-only.
+let cfgCache = null;
+
 async function getConfig() {
+  if (!cfgCache) cfgCache = loadConfig().catch(e => { cfgCache = null; throw e; });
+  return cfgCache;
+}
+
+async function loadConfig() {
   const [{ config }, { secrets }] = await Promise.all([
     chrome.storage.sync.get({ config: DEFAULTS }),
     chrome.storage.local.get({ secrets: {} })
   ]);
-  let cfg = migrateConfig(config);
+  const migrated = migrateConfig(config);
+  let cfg = migrated;
   // Fix 1: credentials live in storage.local (not synced to the Google
   // account). Merge them back onto the synced, sanitized config.
   cfg = applySecrets(cfg, secrets);
 
   // Persist migrated config once so the options UI sees it — and move
-  // any credentials that were sitting in the synced blob (pre-update
-  // installs) out into storage.local.
-  if (!config?.targets && cfg.targets) {
-    const { config: sanitized, secrets: migratedSecrets } = extractSecrets(cfg);
+  // any credentials still sitting in the synced blob (pre-update installs,
+  // or URL/header secrets that S4 newly recognizes) out into storage.local.
+  // Once rewritten the synced blob is clean, so this doesn't loop.
+  const { config: sanitized, secrets: syncedSecrets } = extractSecrets(migrated);
+  const legacy = !config?.targets && cfg.targets;
+  if (legacy || Object.keys(syncedSecrets).length) {
     await chrome.storage.sync.set({ config: sanitized });
-    if (Object.keys(migratedSecrets).length) {
-      await chrome.storage.local.set({ secrets: { ...secrets, ...migratedSecrets } });
+    if (Object.keys(syncedSecrets).length) {
+      await chrome.storage.local.set({ secrets: { ...secrets, ...syncedSecrets } });
     }
   }
   return cfg;
@@ -276,7 +328,16 @@ async function computeState(cfg) {
     return svc ? { state: "ON", service: svc, url: t.url } : { state: "OFF", service: null, url: null };
   }
 
-  const tabs = await chrome.tabs.query({});
+  // P4: let Chrome filter to candidate tabs when every prefix can be a
+  // match pattern; matchService below still has the final say.
+  const patterns = serviceMatchPatterns(cfg);
+  if (patterns && !patterns.length) return { state: "OFF", service: null, url: null };
+  let tabs;
+  try {
+    tabs = await chrome.tabs.query(patterns ? { url: patterns } : {});
+  } catch {
+    tabs = await chrome.tabs.query({});
+  }
   for (const t of tabs) {
     const svc = matchService(t.url || "", cfg);
     if (svc) return { state: "ON", service: svc, url: t.url || null };
@@ -305,78 +366,119 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+const SUPERSEDED = Object.freeze({ ok: false, status: 0, text: "", error: true, superseded: true, errorMsg: "superseded" });
+
+// An AbortSignal that fires on a per-request timeout OR when the outer
+// (edge) signal aborts. `done()` clears the timer and detaches.
+function timeoutSignal(ms, outer) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), ms);
+  const onOuter = () => ac.abort();
+  outer?.addEventListener("abort", onOuter, { once: true });
+  return {
+    signal: ac.signal,
+    done() {
+      clearTimeout(timer);
+      outer?.removeEventListener("abort", onOuter);
+    }
+  };
+}
+
 // Single fetch with retry-on-network-error (not on bad status — status
 // handling is the caller's job via httpHookSuccess). Optionally reads
-// the response body so the caller can do body matching.
+// the response body so the caller can do body matching. `signal` is the
+// edge signal (R1): once it aborts, the request is cancelled and no
+// further retries are attempted.
 async function callUrl(url, timeoutSec, fetchOpts = {}) {
   const readBody = !!fetchOpts.readBody;
+  const outer = fetchOpts.signal;
   for (let attempt = 0; attempt <= RETRY_MAX; attempt++) {
-    const ac = new AbortController();
-    const t = setTimeout(() => ac.abort(), Math.max(1, timeoutSec) * 1000);
+    if (outer?.aborted) return SUPERSEDED;
+    const to = timeoutSignal(Math.max(1, timeoutSec) * 1000, outer);
     try {
       const r = await fetch(url, {
         method: fetchOpts.method || "GET",
         headers: fetchOpts.headers || undefined,
         body: fetchOpts.body || undefined,
+        redirect: fetchOpts.redirect || "follow",
         cache: "no-store",
-        signal: ac.signal
+        signal: to.signal
       });
       const text = readBody ? await r.text().catch(() => "") : "";
       return { ok: r.ok, status: r.status, text, error: false };
     } catch (e) {
-      if (attempt >= RETRY_MAX) {
-        const errorMsg = e?.name === "AbortError" ? "timeout" : (e?.message || "network error");
+      if (outer?.aborted) return SUPERSEDED;
+      // P5: a timeout means the host is down/unreachable — retrying would
+      // only multiply the wait. Retry fast network errors only.
+      const timedOut = e?.name === "AbortError";
+      if (timedOut || attempt >= RETRY_MAX) {
+        const errorMsg = timedOut ? "timeout" : (e?.message || "network error");
         return { ok: false, status: 0, text: "", error: true, errorMsg };
       }
       await sleep(backoffMs(attempt));
     } finally {
-      clearTimeout(t);
+      to.done();
     }
   }
   return { ok: false, status: 0, text: "", error: true, errorMsg: "network error" };
 }
 
+// Shape an executor result from a callUrl response.
+function resultOf(res) {
+  if (res.superseded) return { ok: false, superseded: true, status: 0 };
+  return { ok: res.ok, status: res.status, error: res.ok ? undefined : res.errorMsg };
+}
+
+// P3: remember what the toolbar shows so unchanged ticks skip setIcon
+// (which re-decodes four PNGs). Resets with the worker, so the first tick
+// after a wake always applies it.
+let iconIsColor = null;
+
 async function setToolbarIcon(state, cfg) {
   try {
     const mode = cfg?.iconMode || DEFAULTS.iconMode;
     const useColor = mode === "alwaysColor" ? true : state !== "OFF";
+    if (useColor === iconIsColor) return;
     await chrome.action.setIcon({ path: useColor ? ICONS_COLOR : ICONS_GRAY });
+    iconIsColor = useColor;
   } catch {
     // ignore
   }
 }
 
+const NETWORK_ERROR = { ok: false, status: 0, text: "", error: true, errorMsg: "network error" };
+
 // ---- Target executors ----
 
-async function runListenerTarget(target, vars, timeoutSec) {
+async function runListenerTarget(target, vars, timeoutSec, signal) {
   if (!target?.enabled || !target?.url) return { skipped: true };
   const finalUrl = buildListenerUrl(target.url, vars);
   if (!finalUrl) return { skipped: true };
-  const res = await callUrl(finalUrl, timeoutSec).catch(() => ({ ok: false, status: 0, error: true, errorMsg: "network error" }));
-  return { ok: res.ok, status: res.status, error: res.ok ? undefined : res.errorMsg };
+  const res = await callUrl(finalUrl, timeoutSec, { signal }).catch(() => NETWORK_ERROR);
+  return resultOf(res);
 }
 
-async function getLedStatus(baseUrl, timeoutSec) {
+async function getLedStatus(baseUrl, timeoutSec, signal) {
   try {
-    const r = await callUrl(baseUrl + "/led/status", timeoutSec);
+    const r = await callUrl(baseUrl + "/led/status", timeoutSec, { signal });
     return r.ok ? "REACHABLE" : "UNREACHABLE";
   } catch {
     return "UNREACHABLE";
   }
 }
 
-async function runSimpleLedTarget(target, vars, timeoutSec) {
+async function runSimpleLedTarget(target, vars, timeoutSec, signal) {
   if (!target?.enabled || !target?.baseUrl) return { skipped: true };
   const base = trimSlash(target.baseUrl);
   // Reachability gating now lives in the `verify` reconcile path
   // (reconcileTarget); the edge always attempts the set.
   const path = vars.state === "ON" ? "/led/on" : "/led/off";
-  const res = await callUrl(base + path, timeoutSec).catch(() => ({ ok: false, status: 0, error: true, errorMsg: "network error" }));
-  return { ok: res.ok, status: res.status, error: res.ok ? undefined : res.errorMsg };
+  const res = await callUrl(base + path, timeoutSec, { signal }).catch(() => NETWORK_ERROR);
+  return resultOf(res);
 }
 
-async function ledReachable(target, timeoutSec) {
-  const st = await getLedStatus(trimSlash(target.baseUrl), timeoutSec);
+async function ledReachable(target, timeoutSec, signal) {
+  const st = await getLedStatus(trimSlash(target.baseUrl), timeoutSec, signal);
   return st === "REACHABLE";
 }
 
@@ -386,13 +488,15 @@ function buildAuthHeader(basicAuth) {
   return `Basic ${token}`;
 }
 
-async function runHttpHookTarget(target, vars, timeoutSec) {
+async function runHttpHookTarget(target, vars, timeoutSec, signal) {
   if (!target?.enabled) return;
 
   const urlTemplate = vars.state === "ON" ? target.onUrl : target.offUrl;
   if (!urlTemplate) return;
 
-  const url = applyTemplate(urlTemplate, vars);
+  // S1: substituted values are URL-encoded in the URL and JSON-escaped in
+  // JSON bodies, so a crafted meeting link can't inject params/fields.
+  const url = applyTemplate(urlTemplate, vars, "url");
   const method = (target.method || "GET").toUpperCase();
 
   const headers = new Headers();
@@ -404,7 +508,7 @@ async function runHttpHookTarget(target, vars, timeoutSec) {
   let body = null;
   const bodyTpl = target.body || "";
   if (method !== "GET" && method !== "HEAD") {
-    const rendered = applyTemplate(bodyTpl, vars);
+    const rendered = applyTemplate(bodyTpl, vars, bodyEncodingFor(bodyTpl));
     if (rendered.length) body = rendered;
   }
 
@@ -413,18 +517,32 @@ async function runHttpHookTarget(target, vars, timeoutSec) {
   // behaves identically live. We only read the body when a match string
   // is configured, to avoid pulling response bodies we won't inspect.
   const needsBody = !!(vars.state === "ON" ? target.matchOn : target.matchOff);
-  const res = await callUrl(url, timeoutSec, { method, headers, body, readBody: needsBody })
-    .catch(() => ({ ok: false, status: 0, text: "", error: true }));
+  const res = await callUrl(url, timeoutSec, {
+    method, headers, body, readBody: needsBody, signal, redirect: redirectPolicyFor(target)
+  }).catch(() => NETWORK_ERROR);
+  if (res.superseded) return resultOf(res);
   const ok = httpHookSuccess(target, vars.state, res);
   if (!ok) debugLog("httpHook:fail", target.id, vars.state, res.status || res.error);
   return { ok, status: res.status, error: ok ? undefined : (res.errorMsg || (res.status ? `HTTP ${res.status}` : "check failed")) };
+}
+
+function iotLocalHeaders(target) {
+  const headers = new Headers();
+  if (target.localToken) headers.set("X-API-Token", target.localToken);
+  return headers;
+}
+
+function iotCloudHeaders(target) {
+  const headers = new Headers();
+  if (target.cloudToken) headers.set("Authorization", `Bearer ${target.cloudToken}`);
+  return headers;
 }
 
 // Local-first hybrid: tries the device's local HTTP API first with a
 // short per-row timeout and no retries, then falls back to the AWS IoT
 // cloud bridge. Either path flips the sign — exactly one fires per
 // event under normal conditions.
-async function runIotHybridTarget(target, vars, timeoutSec) {
+async function runIotHybridTarget(target, vars, timeoutSec, signal) {
   if (!target?.enabled) return { skipped: true };
   const mode = desiredMode(target, vars.state);
 
@@ -432,33 +550,29 @@ async function runIotHybridTarget(target, vars, timeoutSec) {
   //    changed and we want either an instant success or a quick fall
   //    through to cloud).
   if (target.localBase) {
-    const localTimeoutMs = clampLocalTimeoutMs(target.localTimeoutMs, 1500);
-    const ac = new AbortController();
-    const to = setTimeout(() => ac.abort(), localTimeoutMs);
+    const to = timeoutSignal(clampLocalTimeoutMs(target.localTimeoutMs, 1500), signal);
     try {
-      const headers = new Headers();
-      if (target.localToken) headers.set("X-API-Token", target.localToken);
       const r = await fetch(
         `${trimSlash(target.localBase)}/api/set?state=${mode}`,
-        { method: "GET", headers, cache: "no-store", signal: ac.signal }
+        { method: "GET", headers: iotLocalHeaders(target), cache: "no-store", redirect: "error", signal: to.signal }
       );
       if (r.ok) return { ok: true, via: "local", status: r.status }; // local won
     } catch (_) {
       // ignore — fall through to cloud
     } finally {
-      clearTimeout(to);
+      to.done();
     }
+    if (signal?.aborted) return resultOf(SUPERSEDED);
   }
 
   // 2. Cloud fallback. Re-uses the standard timeout + retry behaviour
   //    of callUrl because we're already off the happy path.
   if (!target.cloudBase || !target.thing) return { ok: false, via: "none", status: 0 };
-  const headers = new Headers();
-  if (target.cloudToken) headers.set("Authorization", `Bearer ${target.cloudToken}`);
   const cloudUrl = `${trimSlash(target.cloudBase)}/?thing=${encodeURIComponent(target.thing)}&mode=${mode}`;
-  const res = await callUrl(cloudUrl, timeoutSec, { method: "POST", headers })
-    .catch(() => ({ ok: false, status: 0, error: true, errorMsg: "network error" }));
-  return { ok: res.ok, via: "cloud", status: res.status, error: res.ok ? undefined : res.errorMsg };
+  const res = await callUrl(cloudUrl, timeoutSec, {
+    method: "POST", headers: iotCloudHeaders(target), signal, redirect: "error"
+  }).catch(() => NETWORK_ERROR);
+  return { ...resultOf(res), via: "cloud" };
 }
 
 // Read the device's actual mode for a `verify` reconcile. Tries the fast
@@ -466,24 +580,20 @@ async function runIotHybridTarget(target, vars, timeoutSec) {
 // back to the cloud bridge's shadow-read so verify still works off-network
 // (laptop asleep at home, on a train, guest wifi, …). Returns 0|1|2 or
 // null when neither path can tell.
-async function readIotHybridMode(target, timeoutSec) {
-  const local = await readIotLocalMode(target);
+async function readIotHybridMode(target, timeoutSec, signal) {
+  const local = await readIotLocalMode(target, signal);
   if (local !== null) return local;
-  return readIotCloudMode(target, timeoutSec);
+  return readIotCloudMode(target, timeoutSec, signal);
 }
 
 // Local readback: GET the firmware's /api/status on the LAN.
-async function readIotLocalMode(target) {
+async function readIotLocalMode(target, signal) {
   if (!target?.localBase) return null;
-  const localTimeoutMs = clampLocalTimeoutMs(target.localTimeoutMs, 1500);
-  const ac = new AbortController();
-  const to = setTimeout(() => ac.abort(), localTimeoutMs);
+  const to = timeoutSignal(clampLocalTimeoutMs(target.localTimeoutMs, 1500), signal);
   try {
-    const headers = new Headers();
-    if (target.localToken) headers.set("X-API-Token", target.localToken);
     const r = await fetch(
       `${trimSlash(target.localBase)}/api/status`,
-      { method: "GET", headers, cache: "no-store", signal: ac.signal }
+      { method: "GET", headers: iotLocalHeaders(target), cache: "no-store", redirect: "error", signal: to.signal }
     );
     if (!r.ok) return null;
     const json = await r.json().catch(() => null);
@@ -491,20 +601,19 @@ async function readIotLocalMode(target) {
   } catch (_) {
     return null;
   } finally {
-    clearTimeout(to);
+    to.done();
   }
 }
 
 // Cloud readback: the bridge Lambda answers GET ?thing=… by reading the
 // device's AWS IoT Device Shadow (last reported state). Same endpoint +
 // bearer token as the command path, just a GET instead of a POST.
-async function readIotCloudMode(target, timeoutSec) {
+async function readIotCloudMode(target, timeoutSec, signal) {
   if (!target?.cloudBase || !target?.thing) return null;
-  const headers = new Headers();
-  if (target.cloudToken) headers.set("Authorization", `Bearer ${target.cloudToken}`);
   const url = `${trimSlash(target.cloudBase)}/?thing=${encodeURIComponent(target.thing)}`;
-  const res = await callUrl(url, clampTimeoutSec(timeoutSec, 3), { method: "GET", headers, readBody: true })
-    .catch(() => ({ ok: false, text: "" }));
+  const res = await callUrl(url, clampTimeoutSec(timeoutSec, 3), {
+    method: "GET", headers: iotCloudHeaders(target), readBody: true, signal, redirect: "error"
+  }).catch(() => ({ ok: false, text: "" }));
   if (!res.ok) return null;
   return parseCloudStateMode(res.text);
 }
@@ -526,14 +635,15 @@ function makeVars(st, cfg) {
 }
 
 // Route a target to its executor and tag the result with id/type so the
-// activity log and reconcile pass can attribute outcomes.
-async function dispatchTarget(t, vars, timeoutSec) {
+// activity log and reconcile pass can attribute outcomes. `signal` is the
+// edge signal (R1) that cancels the request when a newer edge fires.
+async function dispatchTarget(t, vars, timeoutSec, signal) {
   const t0 = Date.now();
   let res = { skipped: true };
-  if (t.type === "listener") res = await runListenerTarget(t, vars, timeoutSec);
-  else if (t.type === "simpleLed") res = await runSimpleLedTarget(t, vars, timeoutSec);
-  else if (t.type === "httpHook") res = await runHttpHookTarget(t, vars, timeoutSec);
-  else if (t.type === "iotHybrid") res = await runIotHybridTarget(t, vars, timeoutSec);
+  if (t.type === "listener") res = await runListenerTarget(t, vars, timeoutSec, signal);
+  else if (t.type === "simpleLed") res = await runSimpleLedTarget(t, vars, timeoutSec, signal);
+  else if (t.type === "httpHook") res = await runHttpHookTarget(t, vars, timeoutSec, signal);
+  else if (t.type === "iotHybrid") res = await runIotHybridTarget(t, vars, timeoutSec, signal);
   return { id: t.id, type: t.type, ...res, ms: Date.now() - t0 };
 }
 
@@ -541,16 +651,24 @@ async function dispatchTarget(t, vars, timeoutSec) {
 // once, regardless of reconcile mode (that's the "single" fire, and also
 // the initial fire for verify/always).
 async function applySideEffects(next, cfg, reason = "") {
-  await setToolbarIcon(next.state, cfg);
+  // R1: cancel the previous edge's in-flight requests and retries before
+  // firing this one, so an older ON can't land after this OFF.
+  edgeAbort.abort();
+  edgeAbort = new AbortController();
+  const signal = edgeAbort.signal;
+
+  // P6: the icon update runs alongside the target requests, not before.
+  const iconJob = setToolbarIcon(next.state, cfg);
   const vars = makeVars(next, cfg);
   const timeoutSec = clampTimeoutSec(cfg.timeoutSec, 3);
 
   const jobs = [];
   for (const t of cfg.targets || []) {
     if (!t?.enabled) continue;
-    jobs.push(dispatchTarget(t, vars, timeoutSec).then(r => ({ ...r, action: "edge" })));
+    jobs.push(dispatchTarget(t, vars, timeoutSec, signal).then(r => ({ ...r, action: "edge" })));
   }
   const results = (await Promise.allSettled(jobs)).map(r => r.value).filter(Boolean);
+  await iconJob;
   await logActivity({ kind: "edge", reason, to: next.state, service: next.service || "", targets: results });
 }
 
@@ -559,28 +677,29 @@ async function applySideEffects(next, cfg, reason = "") {
 // only on drift (iotHybrid via /api/status) or when reachable (simpleLed,
 // whose /led/status is reachability-only). Returns a log-friendly record;
 // `noop:true` means nothing was sent.
-async function reconcileTarget(t, vars, timeoutSec) {
+async function reconcileTarget(t, vars, timeoutSec, signal) {
   const mode = resolveReconcile(t);
   if (mode === "single") return { id: t.id, type: t.type, action: "skip", noop: true };
 
   if (mode === "always") {
-    const r = await dispatchTarget(t, vars, timeoutSec);
+    const r = await dispatchTarget(t, vars, timeoutSec, signal);
     return { ...r, action: "reassert" };
   }
 
   // mode === "verify"
   if (t.type === "iotHybrid") {
-    const actual = await readIotHybridMode(t, timeoutSec);
+    const actual = await readIotHybridMode(t, timeoutSec, signal);
+    if (signal.aborted) return { id: t.id, type: t.type, action: "verify", noop: true, superseded: true };
     const drift = reconcileDrift(desiredMode(t, vars.state), actual);
     if (drift === true) {
-      const r = await dispatchTarget(t, vars, timeoutSec);
+      const r = await dispatchTarget(t, vars, timeoutSec, signal);
       return { ...r, action: "remediate", drift: true, actual };
     }
     return { id: t.id, type: t.type, action: "verify", noop: true, drift, actual };
   }
   if (t.type === "simpleLed") {
-    if (await ledReachable(t, timeoutSec)) {
-      const r = await dispatchTarget(t, vars, timeoutSec);
+    if (await ledReachable(t, timeoutSec, signal)) {
+      const r = await dispatchTarget(t, vars, timeoutSec, signal);
       return { ...r, action: "reassert" };
     }
     return { id: t.id, type: t.type, action: "verify", noop: true, reachable: false };
@@ -590,15 +709,17 @@ async function reconcileTarget(t, vars, timeoutSec) {
 
 // Heartbeat reconciliation: runs only on the periodic alarm (never on
 // every tab event) while the meeting state is unchanged. Keeps devices at
-// the desired state without re-firing notification targets.
+// the desired state without re-firing notification targets. Runs under
+// the current edge's signal, so a new edge also cancels a stale reassert.
 async function reconcilePass(cfg, cur) {
+  const signal = edgeAbort.signal;
   const vars = makeVars(cur, cfg);
   const timeoutSec = clampTimeoutSec(cfg.timeoutSec, 3);
   const jobs = [];
   for (const t of cfg.targets || []) {
     if (!t?.enabled) continue;
     if (resolveReconcile(t) === "single") continue;
-    jobs.push(reconcileTarget(t, vars, timeoutSec));
+    jobs.push(reconcileTarget(t, vars, timeoutSec, signal));
   }
   if (!jobs.length) return;
   const results = (await Promise.allSettled(jobs)).map(r => r.value).filter(Boolean);
@@ -613,19 +734,17 @@ async function tick(reason = "") {
   debugLog("tick:start", reason);
   const cfg = await getConfig();
   const pause = await getPause();
-  // Hydrate the last-applied state so a freshly-woken worker compares
-  // against reality instead of the cold-start OFF default (the fix for
-  // duplicate "in a meeting" pushes).
-  const hydrated = await loadCurrent();
-  if (hydrated) current = { ...hydrated, ts: Date.now() };
+  // Hydrate the last-applied state (once per worker) so a freshly-woken
+  // worker compares against reality instead of the cold-start OFF default
+  // (the fix for duplicate "in a meeting" pushes).
+  await ensureCurrent();
   // While paused, force OFF regardless of meeting tabs.
   const next = isPaused(pause) ? { ...OFF_STATE } : await computeState(cfg);
 
   if (sameState(next, current)) {
-    // Ensure icon is correct after SW wake
+    // Ensure icon is correct after SW wake (no-op once applied — P3)
     await setToolbarIcon(next.state, cfg);
-    current = { ...next, ts: Date.now() };
-    await saveCurrent(current);
+    await commitCurrent(next);
     debugLog("tick:same", current.state, current.service);
     // Reconcile only on the heartbeat alarm (never per tab event) so we
     // don't hammer device status endpoints, and never while paused.
@@ -638,13 +757,12 @@ async function tick(reason = "") {
   debounceTimer = setTimeout(async () => {
     const cfg2 = await getConfig();
     const pause2 = await getPause();
-    const prev = await loadCurrent();
+    const prev = { ...current };
     const next2 = isPaused(pause2) ? { ...OFF_STATE } : await computeState(cfg2);
-    current = { ...next2, ts: Date.now() };
-    await saveCurrent(current);
-    // Re-check the edge after the debounce against persisted state: if it
-    // settled back to what we already dispatched, don't re-fire.
-    if (prev && sameState(next2, prev)) {
+    await commitCurrent(next2);
+    // Re-check the edge after the debounce against what we last
+    // dispatched: if it settled back, don't re-fire.
+    if (sameState(next2, prev)) {
       await setToolbarIcon(current.state, cfg2);
       debugLog("tick:debounce-noedge", current.state);
       return;
@@ -655,12 +773,20 @@ async function tick(reason = "") {
   }, DEBOUNCE_MS);
 }
 
+// Activation / focus only matter when the trigger is the active tab.
+async function tickIfActiveTabMode(reason) {
+  const cfg = await getConfig();
+  if (cfg.triggerMode === "ACTIVE_TAB") tick(reason);
+}
+
 // Tab/window events
 chrome.tabs.onCreated.addListener(() => tick("created"));
-chrome.tabs.onUpdated.addListener(() => tick("updated"));
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+  if (isRelevantTabUpdate(changeInfo)) tick("updated");
+});
 chrome.tabs.onRemoved.addListener(() => tick("removed"));
-chrome.tabs.onActivated.addListener(() => tick("activated"));
-chrome.windows.onFocusChanged.addListener(() => tick("focus"));
+chrome.tabs.onActivated.addListener(() => tickIfActiveTabMode("activated"));
+chrome.windows.onFocusChanged.addListener(() => tickIfActiveTabMode("focus"));
 chrome.windows.onRemoved.addListener(() => tick("window-removed"));
 
 chrome.runtime.onStartup.addListener(() => {
@@ -689,16 +815,29 @@ chrome.alarms?.onAlarm.addListener(alarm => {
 // onStartup nor onInstalled fires).
 ensureReconcileAlarm();
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Only this extension's own pages may drive the worker.
+  if (sender?.id !== chrome.runtime.id) return false;
   (async () => {
+    if (msg?.type === "TEST_TARGET") {
+      // S9: the options Test buttons run through the exact live executor,
+      // so a test can never disagree with real dispatch. Uses its own
+      // signal so a meeting edge doesn't cancel a test.
+      const target = { ...(msg.target || {}), enabled: true };
+      const vars = { state: msg.state === "ON" ? "ON" : "OFF", service: "test", url: "", ts: Date.now() };
+      const r = await dispatchTarget(target, vars, clampTimeoutSec(msg.timeoutSec, 3), new AbortController().signal);
+      sendResponse({ ok: r.ok === true, status: r.status || 0, error: r.error || "", via: r.via || "", ms: r.ms, skipped: !!r.skipped });
+      return;
+    }
     if (msg?.type === "GET_STATE") {
-      const hydrated = await loadCurrent();
-      if (hydrated) current = { ...hydrated, ts: Date.now() };
+      await ensureCurrent();
       const pause = await getPause();
       sendResponse({ state: current.state, service: current.service, pause });
       return;
     }
     if (msg?.type === "CONFIG_UPDATED") {
+      // The storage.onChanged invalidation may not have arrived yet.
+      cfgCache = null;
       await tick("config");
       sendResponse({ ok: true });
       return;

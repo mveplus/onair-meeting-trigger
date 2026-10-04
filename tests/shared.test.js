@@ -47,7 +47,18 @@ import {
   targetSeverity,
   logSeverity,
   describeTargetLine,
-  describeLogEntry
+  describeLogEntry,
+  bodyEncodingFor,
+  redirectPolicyFor,
+  isRelevantTabUpdate,
+  isSecretHeader,
+  urlCarriesSecret,
+  urlMatchesPrefix,
+  prefixToMatchPattern,
+  serviceMatchPatterns,
+  originPatternsFor,
+  orphanedOrigins,
+  importDestinations
 } from "../extension/shared.js";
 
 // ---------------------------------------------------------------------------
@@ -697,5 +708,222 @@ describe("parseCloudStateMode", () => {
     assert.equal(parseCloudStateMode("not json"), null);
     assert.equal(parseCloudStateMode(null), null);
     assert.equal(parseCloudStateMode({ ok: true }), null); // no mode, no reported
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review backlog fixes (docs/REVIEW-BACKLOG.md)
+// ---------------------------------------------------------------------------
+
+describe("S1: context-aware template escaping", () => {
+  const evil = { state: "ON", service: "meet", url: "https://meet.google.com/abc?a=1&state=OFF", ts: 1 };
+
+  test("url mode encodes values so params can't be injected", () => {
+    const out = applyTemplate("http://h/x?u={url}&state={state}", evil, "url");
+    assert.equal(out, "http://h/x?u=https%3A%2F%2Fmeet.google.com%2Fabc%3Fa%3D1%26state%3DOFF&state=ON");
+    assert.equal(new URL(out).searchParams.getAll("state").join(","), "ON");
+  });
+
+  test("json mode escapes quotes so fields can't be injected", () => {
+    const vars = { ...evil, service: 'x","admin":true,"y":"' };
+    const out = applyTemplate('{"svc":"{service}"}', vars, "json");
+    assert.deepEqual(JSON.parse(out), { svc: 'x","admin":true,"y":"' });
+  });
+
+  test("{url_raw} is never escaped; default mode stays raw", () => {
+    assert.equal(applyTemplate("u={url_raw}", evil, "url"), `u=${evil.url}`);
+    assert.equal(applyTemplate("u={url}", evil), `u=${evil.url}`);
+  });
+
+  test("buildListenerUrl encodes token values", () => {
+    const out = buildListenerUrl("http://h/e?s={state}&u={url}", evil);
+    assert.equal(new URL(out).searchParams.get("u"), evil.url);
+    assert.equal(new URL(out).searchParams.getAll("state").length, 0);
+  });
+
+  test("bodyEncodingFor picks json only for JSON-looking bodies", () => {
+    assert.equal(bodyEncodingFor(' {"a":1}'), "json");
+    assert.equal(bodyEncodingFor("[1]"), "json");
+    assert.equal(bodyEncodingFor("state={state}"), "none");
+    assert.equal(bodyEncodingFor(undefined), "none");
+  });
+});
+
+describe("S2: isPrivateHost only trusts real IP literals", () => {
+  test("look-alike hostnames are public", () => {
+    for (const u of ["http://10.evil.com/", "http://192.168.attacker.net/", "http://127.0.0.1.nip.io/", "http://172.16.x.io/"]) {
+      assert.equal(isPrivateHost(u), false, u);
+    }
+  });
+
+  test("private IPv4/IPv6 literals and LAN names are private", () => {
+    for (const u of ["http://169.254.1.1/", "http://100.100.1.1/", "http://[::1]/", "http://[fd00::1]/",
+      "http://[fe80::1]/", "http://[::ffff:192.168.1.1]/", "http://router.home.arpa/", "http://x.localhost/"]) {
+      assert.equal(isPrivateHost(u), true, u);
+    }
+  });
+
+  test("public IPv6 and CGNAT edge are public", () => {
+    for (const u of ["http://[2001:db8::1]/", "http://[::ffff:8.8.8.8]/", "http://100.128.0.1/"]) {
+      assert.equal(isPrivateHost(u), false, u);
+    }
+  });
+
+  test("the cleartext-token warning now fires for a look-alike host", () => {
+    const t = { type: "iotHybrid", cloudBase: "http://10.evil.com", cloudToken: "secret" };
+    assert.equal(endpointSecurityWarnings(t).length, 1);
+  });
+});
+
+describe("S3: redirect policy for credentialed requests", () => {
+  test("iotHybrid never follows redirects", () => {
+    assert.equal(redirectPolicyFor({ type: "iotHybrid" }), "error");
+  });
+
+  test("httpHook refuses redirects only when it carries credentials", () => {
+    assert.equal(redirectPolicyFor({ type: "httpHook", headers: [] }), "follow");
+    assert.equal(redirectPolicyFor({ type: "httpHook", headers: [{ key: "X-API-Token", value: "t" }] }), "error");
+    assert.equal(redirectPolicyFor({ type: "httpHook", headers: [{ key: "Authorization", value: "" }] }), "follow");
+    assert.equal(redirectPolicyFor({ type: "httpHook", basicAuth: { user: "u", pass: "" } }), "error");
+  });
+
+  test("listener / simpleLed follow redirects", () => {
+    assert.equal(redirectPolicyFor({ type: "listener" }), "follow");
+    assert.equal(redirectPolicyFor({ type: "simpleLed" }), "follow");
+  });
+});
+
+describe("R1: superseded requests render as expected, not as failures", () => {
+  test("superseded target is muted with a plain-English line", () => {
+    const t = { type: "simpleLed", ok: false, superseded: true, ms: 12 };
+    assert.equal(targetSeverity(t), "muted");
+    assert.equal(describeTargetLine(t).text, "LED sign cancelled — superseded by a newer change · 12 ms");
+    assert.equal(logSeverity({ kind: "edge", targets: [t] }), "muted");
+  });
+});
+
+describe("P1: tab update filtering", () => {
+  test("only URL changes and finished loads are relevant", () => {
+    assert.equal(isRelevantTabUpdate({ url: "https://meet.google.com/x" }), true);
+    assert.equal(isRelevantTabUpdate({ status: "complete" }), true);
+    assert.equal(isRelevantTabUpdate({ status: "loading" }), false);
+    assert.equal(isRelevantTabUpdate({ title: "Meet" }), false);
+    assert.equal(isRelevantTabUpdate({ favIconUrl: "x" }), false);
+    assert.equal(isRelevantTabUpdate({ audible: true }), false);
+    assert.equal(isRelevantTabUpdate(undefined), false);
+  });
+});
+
+describe("S4: wider secret detection", () => {
+  test("credential-looking header names are secret", () => {
+    for (const k of ["Authorization", "X-API-Token", "X-Api-Key", "Cookie", "X-Auth-Token", "Api-Key", "X-Session-Id"]) {
+      assert.equal(isSecretHeader(k), true, k);
+    }
+    for (const k of ["Content-Type", "Accept", "User-Agent", "Keep-Alive", ""]) {
+      assert.equal(isSecretHeader(k), false, k);
+    }
+  });
+
+  test("URL-borne secrets are recognized", () => {
+    for (const u of [
+      "http://ha.local:8123/api/webhook/abc123",
+      "https://hooks.slack.com/services/T0/B0/xyz",
+      "https://discord.com/api/webhooks/1/abc",
+      "https://maker.ifttt.com/trigger/onair/with/key/abc",
+      "https://ntfy.sh/topic?auth=xyz",
+      "https://api.example.com/x?api_key=1&state={state}",
+      "https://user:pw@example.com/x"
+    ]) {
+      assert.equal(urlCarriesSecret(u), true, u);
+    }
+    for (const u of ["http://127.0.0.1:8765/event?state={state}&url={url}", "http://192.168.1.17/cm?cmnd=Power%20On", "", "nope"]) {
+      assert.equal(urlCarriesSecret(u), false, u);
+    }
+  });
+
+  test("custom secret headers and secret URLs round-trip through extract/apply", () => {
+    const cfg = { targets: [
+      { id: "h1", type: "httpHook", onUrl: "http://ha.local/api/webhook/on123", offUrl: "http://lan/off",
+        headers: [{ key: "X-Api-Key", value: "k" }, { key: "Content-Type", value: "text/plain" }] },
+      { id: "l1", type: "listener", url: "https://ntfy.sh/t?auth=abc" }
+    ] };
+    const { config: clean, secrets } = extractSecrets(cfg);
+    const json = JSON.stringify(clean);
+    for (const leak of ["on123", "\"k\"", "auth=abc"]) assert.ok(!json.includes(leak), leak);
+    assert.equal(clean.targets[0].offUrl, "http://lan/off");
+    assert.equal(clean.targets[0].headers[1].value, "text/plain");
+    assert.deepEqual(applySecrets(clean, secrets), cfg);
+  });
+
+  test("a secret listener URL over public http warns", () => {
+    assert.equal(endpointSecurityWarnings({ type: "listener", url: "http://example.com/x?token=1" }).length, 1);
+    assert.equal(endpointSecurityWarnings({ type: "listener", url: "http://example.com/x" }).length, 0);
+  });
+});
+
+describe("S6: origin-exact prefix matching", () => {
+  test("look-alike hosts don't match", () => {
+    assert.equal(urlMatchesPrefix("https://webex.com.evil.io/x", "https://webex.com"), false);
+    assert.equal(urlMatchesPrefix("https://webex.com@evil.io/x", "https://webex.com"), false);
+    assert.equal(urlMatchesPrefix("http://webex.com/x", "https://webex.com"), false);
+  });
+
+  test("same origin + path prefix matches", () => {
+    assert.equal(urlMatchesPrefix("https://webex.com/meet/1", "https://webex.com"), true);
+    assert.equal(urlMatchesPrefix("https://WEBEX.com/meet/1", "https://webex.com/meet/"), true);
+    assert.equal(urlMatchesPrefix("https://webex.com/other", "https://webex.com/meet/"), false);
+    assert.equal(urlMatchesPrefix("https://webex.com/x", "not a url"), false);
+  });
+
+  test("matchService uses the safe matcher for custom services", () => {
+    const cfg = { customServices: [{ enabled: true, name: "webex", prefixes: ["https://webex.com"] }] };
+    assert.equal(matchService("https://webex.com.evil.io/", cfg), null);
+    assert.equal(matchService("https://webex.com/m", cfg), "webex");
+  });
+});
+
+describe("P4: match patterns for tabs.query", () => {
+  test("prefixes convert to Chrome match patterns", () => {
+    assert.equal(prefixToMatchPattern("https://meet.google.com/"), "https://meet.google.com/*");
+    assert.equal(prefixToMatchPattern("https://x.com/meet"), "https://x.com/meet*");
+    assert.equal(prefixToMatchPattern("http://x:8080/"), null);
+    assert.equal(prefixToMatchPattern("https://x.com/?a=1"), null);
+    assert.equal(prefixToMatchPattern("file:///x"), null);
+  });
+
+  test("any unconvertible prefix falls back to null (query all tabs)", () => {
+    assert.deepEqual(serviceMatchPatterns({ services: { meet: true } }), ["https://meet.google.com/*"]);
+    assert.deepEqual(serviceMatchPatterns({ services: {} }), []);
+    assert.equal(serviceMatchPatterns({ services: { meet: true },
+      customServices: [{ enabled: true, name: "c", prefixes: ["http://lan:9000/"] }] }), null);
+  });
+});
+
+describe("P7 / S8: host permission helpers", () => {
+  test("origin patterns are deduplicated and template-safe", () => {
+    assert.deepEqual(
+      originPatternsFor(["http://a:8080/x?s={state}", "http://a:8080/y", "https://b/", "bad", "ftp://c/"]),
+      ["http://a:8080/*", "https://b/*"]
+    );
+  });
+
+  test("orphaned origins exclude kept and non-site grants", () => {
+    assert.deepEqual(
+      orphanedOrigins(["http://a/*", "http://b:81/*", "<all_urls>", "https://*/*"], ["http://a/*"]),
+      ["http://b:81/*"]
+    );
+  });
+});
+
+describe("S5: import destinations", () => {
+  test("lists every host an import would contact", () => {
+    assert.deepEqual(
+      importDestinations([
+        { type: "listener", url: "https://evil.example/x?u={url}" },
+        { type: "iotHybrid", localBase: "http://10.0.0.5", cloudBase: "https://api.aws.com" },
+        { type: "httpHook", onUrl: "https://evil.example/on", offUrl: "" }
+      ]),
+      ["10.0.0.5", "api.aws.com", "evil.example"]
+    );
   });
 });

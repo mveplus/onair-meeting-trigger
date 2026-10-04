@@ -1,17 +1,15 @@
 import {
-  RETRY_MAX,
   DEFAULT_STATUS_CODES,
   trimSlash,
-  applyTemplate,
-  backoffMs,
   normalizePrefixes,
   normalizeCustomServices,
   normalizeStatusCodes,
   clampMode,
   clampLocalTimeoutMs,
   clampTimeoutSec,
-  buildListenerUrl,
-  httpHookSuccess,
+  originPatternsFor,
+  orphanedOrigins,
+  importDestinations,
   endpointSecurityWarnings,
   extractSecrets,
   applySecrets,
@@ -227,20 +225,34 @@ function migrateIfNeeded(config) {
   };
 }
 
-async function ensureHostPermissionFor(url) {
+// P7: one permission request (one Chrome dialog) for every origin, made
+// as the first await so it still counts as part of the click gesture.
+async function ensureHostPermissions(urls) {
+  const origins = originPatternsFor(urls);
+  if (!origins.length) return true;
   try {
-    const u = new URL(url);
-    const originPattern = `${u.protocol}//${u.host}/*`;
-    return await chrome.permissions.request({ origins: [originPattern] });
+    return await chrome.permissions.request({ origins });
   } catch {
     return false;
   }
 }
 
-function getOriginsFromTargets(cfg) {
+// S8: drop host permissions no configured target (enabled or not) uses.
+async function revokeOrphanedPermissions(cfg) {
+  try {
+    const keep = originPatternsFor(getOriginsFromTargets(cfg, { includeDisabled: true }));
+    const { origins = [] } = await chrome.permissions.getAll();
+    const orphaned = orphanedOrigins(origins, keep);
+    if (orphaned.length) await chrome.permissions.remove({ origins: orphaned });
+  } catch {
+    // best effort — a leftover grant is harmless, just untidy
+  }
+}
+
+function getOriginsFromTargets(cfg, { includeDisabled = false } = {}) {
   const urls = [];
   for (const t of cfg.targets || []) {
-    if (!t.enabled) continue;
+    if (!t.enabled && !includeDisabled) continue;
     if (t.type === "listener" && t.url) urls.push(t.url);
     if (t.type === "simpleLed" && t.baseUrl) urls.push(t.baseUrl + "/");
     if (t.type === "httpHook") {
@@ -467,7 +479,7 @@ function renderTargets(cfg) {
         <label>URL
           <input type="text" class="t_url" placeholder="http://127.0.0.1:8765/event?state={state}&service={service}&url={url}&ts={ts}" value="${esc(t.url || "")}">
         </label>
-        <div class="muted">You can use tokens: <code>{state}</code> <code>{service}</code> <code>{url}</code> <code>{ts}</code></div>
+        <div class="muted">You can use tokens: <code>{state}</code> <code>{service}</code> <code>{url}</code> <code>{ts}</code> (values are URL-encoded)</div>
         <div class="muted" style="margin-top:8px;">If you don&#39;t use tokens, the extension will append <code>?state=..&amp;service=..&amp;url=..&amp;ts=..</code> automatically (backward compatible).</div>
       `;
     } else if (t.type === "simpleLed") {
@@ -557,9 +569,18 @@ function renderTargets(cfg) {
           <label>Response body contains (OFF)
             <input type="text" class="t_match_off" placeholder='{"success":true}' value="${esc(t.matchOff || "")}">
           </label>
-          <label>Basic Auth (optional) user:pass
-            <input type="text" class="t_auth" placeholder="admin:secret" value="${esc(t.basicAuth ? `${t.basicAuth.user||""}:${t.basicAuth.pass||""}` : "")}">
-          </label>
+          <div class="row">
+            <div>
+              <label>Basic Auth user (optional)
+                <input type="text" class="t_auth_user" placeholder="admin" value="${esc(t.basicAuth?.user || "")}" autocomplete="off" spellcheck="false">
+              </label>
+            </div>
+            <div>
+              <label>Basic Auth password
+                <input type="password" class="t_auth_pass" placeholder="password" value="${esc(t.basicAuth?.pass || "")}" autocomplete="off" spellcheck="false">
+              </label>
+            </div>
+          </div>
           <label>Headers (one per line: <code>Key: Value</code>)</label>
           <textarea class="t_headers" placeholder="Content-Type: text/plain">${esc((t.headers||[]).map(h=>`${h.key}: ${h.value}`).join("\n"))}</textarea>
           <label>Body (optional; tokens allowed)</label>
@@ -697,13 +718,9 @@ function buildTargetFromNode(node, t) {
     base.matchOn = node.querySelector(".t_match_on")?.value ?? "";
     base.matchOff = node.querySelector(".t_match_off")?.value ?? "";
 
-    const auth = (node.querySelector(".t_auth")?.value || "").trim();
-    if (auth.includes(":")) {
-      const [user, ...rest] = auth.split(":");
-      base.basicAuth = { user: user || "", pass: rest.join(":") || "" };
-    } else {
-      base.basicAuth = null;
-    }
+    const user = (node.querySelector(".t_auth_user")?.value || "").trim();
+    const pass = node.querySelector(".t_auth_pass")?.value || "";
+    base.basicAuth = user || pass ? { user, pass } : null;
 
     const headersRaw = (node.querySelector(".t_headers")?.value || "").split("\n");
     base.headers = headersRaw
@@ -728,29 +745,38 @@ function buildTargetFromNode(node, t) {
 }
 
 async function testTargetNode(node, t, state) {
-  const cfg = window.__cfg || DEFAULTS;
   const target = buildTargetFromNode(node, t);
   target.enabled = true;
 
   // Request host permission for every URL this target would hit
   // BEFORE we call fetch. Otherwise the first Test on a freshly
   // imported / freshly added row gets blocked at the CORS preflight
-  // because the origin isn't in the extension's granted set. Going
-  // through ensureHostPermissionFor here means each Test click is
-  // a user gesture that can pop the permission dialog — background
-  // event-driven calls can't request permissions, so the Test
-  // button is the natural "first-touch" grant moment alongside Save.
-  for (const url of getOriginsFromTargets({ targets: [target] })) {
-    const granted = await ensureHostPermissionFor(url);
-    if (!granted) {
-      return showStatus(`Permission denied for ${url}`, false);
-    }
+  // because the origin isn't in the extension's granted set. Each Test
+  // click is a user gesture, so it can pop the (single — P7) dialog.
+  if (!(await ensureHostPermissions(getOriginsFromTargets({ targets: [target] })))) {
+    return showStatus("Permission denied — the extension can't reach this target", false);
   }
 
-  const vars = { state, service: "test", url: "", ts: Date.now() };
-  const timeoutMs = Math.max(1, Math.min(20, parseInt($("http_timeout").value || "3", 10))) * 1000;
-  const res = await testSingleTarget(target, vars, timeoutMs);
-  showStatus(`${t.id} ${state}: ${res ? "OK" : "FAIL"}`, !!res);
+  // S9: run the test through the service worker's live executor so a
+  // test can never disagree with real dispatch.
+  let res;
+  try {
+    res = await chrome.runtime.sendMessage({
+      type: "TEST_TARGET", target, state, timeoutSec: clampTimeoutSec($("http_timeout").value, 3)
+    });
+  } catch {
+    res = null;
+  }
+  showStatus(`Test ${state}: ${describeTestResult(res)}`, !!res?.ok);
+}
+
+function describeTestResult(res) {
+  if (!res) return "FAIL — background worker didn't respond";
+  if (res.ok) return `OK${res.via ? ` via ${res.via}` : ""}${res.status ? ` (HTTP ${res.status})` : ""}`;
+  if (res.skipped) return "FAIL — nothing to send (URL missing?)";
+  if (res.error) return `FAIL — ${res.error}`;
+  if (res.status) return `FAIL — HTTP ${res.status}`;
+  return "FAIL — no URL for this state, or response didn't match";
 }
 
 function readTargetsFromUI(cfg) {
@@ -922,10 +948,9 @@ function flashSaved() {
 async function save() {
   const cfg = collectConfigFromUI();
 
-  // Request permissions for all enabled target origins
-  for (const url of getOriginsFromTargets(cfg)) {
-    const ok = await ensureHostPermissionFor(url);
-    if (!ok) return showStatus(`Permission denied for ${url}`, false);
+  // Request permissions for all enabled target origins (one dialog — P7)
+  if (!(await ensureHostPermissions(getOriginsFromTargets(cfg)))) {
+    return showStatus("Permission denied — settings not saved", false);
   }
 
   // Fix 1: split credentials out of the synced blob. The sanitized
@@ -940,6 +965,7 @@ async function save() {
   savedSignature = settingsSignature(cfg);
   flashSaved();
   chrome.runtime.sendMessage({ type: "CONFIG_UPDATED" });
+  revokeOrphanedPermissions(cfg);
 }
 
 function exportHooks() {
@@ -1090,6 +1116,24 @@ async function importHooksFromFile(file) {
       return;
     }
 
+    // S5: review before applying — a shared settings file decides where
+    // meeting status gets sent, and can flip the meeting-URL privacy opt-in.
+    const hosts = importDestinations(normalizedTargets);
+    if (hosts.length && !confirm(
+      `This file adds ${normalizedTargets.length} target(s) that will send your meeting status to:\n\n` +
+      hosts.map(h => `  • ${h}`).join("\n") +
+      "\n\nOnly continue if you trust all of these. Import?"
+    )) {
+      return showStatus("Import cancelled", false);
+    }
+    if (importedSettings?.includeMeetingUrl && !$("include_meeting_url").checked && !confirm(
+      "This file turns ON \"Include the full meeting URL\" — your targets would receive the " +
+      "full meeting link, including the part that lets someone join.\n\n" +
+      "OK = turn it on · Cancel = keep it off (the rest of the import still applies)"
+    )) {
+      importedSettings.includeMeetingUrl = false;
+    }
+
     const cfg = window.__cfg;
     if (importedSettings) {
       cfg.services = importedSettings.services;
@@ -1127,111 +1171,6 @@ async function importHooksFromFile(file) {
   } catch {
     showStatus("Invalid JSON file", false);
   }
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function btoaSafe(s) {
-  try { return btoa(s); } catch { return ""; }
-}
-
-async function fetchWithTimeout(url, opts, timeoutMs, checkStatus = true) {
-  for (let attempt = 0; attempt <= RETRY_MAX; attempt++) {
-    const ac = new AbortController();
-    const t = setTimeout(() => ac.abort(), timeoutMs);
-    try {
-      const r = await fetch(url, { ...opts, cache:"no-store", signal: ac.signal });
-      return checkStatus ? r.ok : true;
-    } catch {
-      if (attempt >= RETRY_MAX) return false;
-      await sleep(backoffMs(attempt));
-    } finally {
-      clearTimeout(t);
-    }
-  }
-  return false;
-}
-
-async function testSingleTarget(t, vars, timeoutMs) {
-  if (!t || !t.enabled) return false;
-  if (t.type === "listener") {
-    const url = buildListenerUrl(t.url, vars);
-    if (!url) return false;
-    return fetchWithTimeout(url, { method:"GET" }, timeoutMs);
-  }
-  if (t.type === "simpleLed") {
-    const base = trimSlash(t.baseUrl || "");
-    if (!base) return false;
-    const url = base + (vars.state === "ON" ? "/led/on" : "/led/off");
-    return fetchWithTimeout(url, { method:"GET" }, timeoutMs);
-  }
-  if (t.type === "iotHybrid") {
-    const mode = vars.state === "ON"
-      ? (Number.isFinite(+t.modeOn) ? +t.modeOn : 1)
-      : (Number.isFinite(+t.modeOff) ? +t.modeOff : 0);
-
-    // Local probe — single fetch, no retries, capped by t_localTimeoutMs.
-    if (t.localBase) {
-      const localTimeout = Math.max(100, Math.min(10000, Number(t.localTimeoutMs) || 1500));
-      try {
-        const ac = new AbortController();
-        const to = setTimeout(() => ac.abort(), localTimeout);
-        const headers = new Headers();
-        if (t.localToken) headers.set("X-API-Token", t.localToken);
-        const r = await fetch(`${trimSlash(t.localBase)}/api/set?state=${mode}`,
-          { method: "GET", headers, cache: "no-store", signal: ac.signal });
-        clearTimeout(to);
-        if (r.ok) return true;
-      } catch (_) { /* fall through to cloud */ }
-    }
-
-    // Cloud fallback.
-    if (!t.cloudBase || !t.thing) return false;
-    const cloudHeaders = new Headers();
-    if (t.cloudToken) cloudHeaders.set("Authorization", `Bearer ${t.cloudToken}`);
-    const cloudUrl = `${trimSlash(t.cloudBase)}/?thing=${encodeURIComponent(t.thing)}&mode=${mode}`;
-    return fetchWithTimeout(cloudUrl, { method: "POST", headers: cloudHeaders }, timeoutMs);
-  }
-  return testHttpHookTarget(t, vars, timeoutMs, vars.state);
-}
-
-async function testHttpHookTarget(t, vars, timeoutMs, state) {
-  const urlTpl = state === "ON" ? t.onUrl : t.offUrl;
-  if (!urlTpl) return false;
-  const url = applyTemplate(urlTpl, vars);
-  const method = (t.method || "GET").toUpperCase();
-
-  const headers = new Headers();
-  for (const h of (t.headers || [])) headers.set(h.key, h.value);
-
-  if (t.basicAuth && (t.basicAuth.user || t.basicAuth.pass)) {
-    headers.set("Authorization", "Basic " + btoaSafe(`${t.basicAuth.user||""}:${t.basicAuth.pass||""}`));
-  }
-
-  const body = (method === "GET" || method === "HEAD") ? undefined : (applyTemplate(t.body || "", vars) || undefined);
-  // Fix 4: same success rule the live background dispatch uses.
-  const res = await fetchWithTimeoutResult(url, { method, headers, body }, timeoutMs);
-  return httpHookSuccess(t, state, res);
-}
-
-async function fetchWithTimeoutResult(url, opts, timeoutMs) {
-  for (let attempt = 0; attempt <= RETRY_MAX; attempt++) {
-    const ac = new AbortController();
-    const t = setTimeout(() => ac.abort(), timeoutMs);
-    try {
-      const r = await fetch(url, { ...opts, cache:"no-store", signal: ac.signal });
-      const text = await r.text().catch(() => "");
-      return { ok: r.ok, status: r.status, text, error: false };
-    } catch {
-      if (attempt >= RETRY_MAX) return { ok: false, status: 0, text: "", error: true };
-      await sleep(backoffMs(attempt));
-    } finally {
-      clearTimeout(t);
-    }
-  }
-  return { ok: false, status: 0, text: "", error: true };
 }
 
 $("savebar_save").addEventListener("click", save);
