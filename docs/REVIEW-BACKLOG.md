@@ -4,6 +4,9 @@ Findings from the 2026-10-04 code review of the extension. Tick an item when
 it lands on `main` (note the PR). Work top-down within each section; IDs are
 stable so commits/PRs can reference them (e.g. `fix(S1): …`).
 
+**Status:** all items implemented — S1–S9, R1, P1–P8 merged in #18;
+U1–U13 in #19.
+
 ## Security
 
 - [x] **S1 — Template injection.** `{url}`/`{service}` are substituted raw into
