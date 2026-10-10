@@ -689,7 +689,7 @@ describe("parseCloudStateMode", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Review backlog fixes (docs/REVIEW-BACKLOG.md)
+// 2026-10 review fixes (S/R/P/U IDs — see PRs #18 and #19)
 // ---------------------------------------------------------------------------
 
 describe("S1: context-aware template escaping", () => {

@@ -1,6 +1,6 @@
 # Privacy Policy — ON-AIR Meeting Trigger
 
-**Last updated:** 2026-06-21
+**Last updated:** 2026-10-10
 
 ## Overview
 ON-AIR Meeting Trigger is a privacy-first browser extension designed to detect when the user is in an online meeting and signal that state to user-configured endpoints. The extension operates entirely on the user’s device.
@@ -19,6 +19,7 @@ Specifically:
 The extension may send HTTP requests **only to network endpoints explicitly configured by the user**, such as:
 - Home Assistant
 - Local IoT devices (e.g. Tasmota, Shelly, ESP-based devices)
+- Notification services the user chooses (e.g. ntfy, Pushover, Telegram), using the user's own topic, account or bot
 - User-owned local webhooks or scripts
 - **User-owned cloud endpoints** the user has deployed in their own AWS account (e.g. an API Gateway + Lambda that publishes to AWS IoT MQTT, as scaffolded by the companion firmware repo's `scripts/cloud-bridge/` deployment helper). The developer of this extension has **no access** to this infrastructure — the user owns the AWS account, the Lambda code, the bearer token, and the cost of every invocation.
 
@@ -30,11 +31,14 @@ The extension:
 - Requests host permissions only after explicit user approval
 
 ## Meeting detection
-To perform its single purpose, the extension checks whether browser tabs matching supported meeting services (Google Meet, Microsoft Teams, Zoom) are open or active.
+To perform its single purpose, the extension checks whether browser tabs matching supported meeting services (Google Meet, Microsoft Teams, Zoom, or sites the user adds) are open or active.
 
 - Only tab URLs and active status are evaluated
 - Page content is not read
-- Data is not stored beyond runtime state
+- Meeting state is kept only as runtime state, except for the optional diagnostics log described below
+
+## Diagnostics log (optional, off by default)
+If the user turns on **Enable debug logging**, the extension keeps a rolling log of up to 200 recent events (state changes, the meeting service, per-endpoint results and errors) in the browser's local extension storage. It never leaves the device unless the user copies it (e.g. **Copy report**, which redacts credentials). Turning logging off stops recording.
 
 ## Optional data in requests
 The extension may include in the requests it sends to user-configured endpoints:

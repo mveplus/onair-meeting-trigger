@@ -21,6 +21,7 @@ extension/         The MV3 extension (this is what ships)
 tests/             Node built-in test runner specs for shared.js (`npm test`)
 package.json       `type:module`; `npm test` → `node --test`
 scripts/           Release tooling (build-zip.sh, release.sh, gen-build-info.sh)
+                   + make-store-shots.sh (Chrome Web Store tiles)
 .github/workflows/release.yml   Tag-triggered release + Chrome Web Store upload
 VERSION            Mirror of manifest version, bumped by release.sh
 docs/, resources/  Documentation and store assets
@@ -127,12 +128,6 @@ docs/, resources/  Documentation and store assets
 - **Options Test buttons** send `TEST_TARGET` to the worker, which runs the
   live `dispatchTarget` — there is no separate test executor in options.js.
   The worker ignores messages whose `sender.id` isn't this extension.
-
-## Open review backlog
-
-`docs/REVIEW-BACKLOG.md` tracks the 2026-10 security / speed / UI review
-(IDs S1–S9, R1, P1–P8, U1–U13). Tick items there as they land; reference the
-ID in commit messages.
 
 ## Tests
 
