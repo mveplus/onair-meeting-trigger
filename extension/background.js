@@ -30,14 +30,15 @@ import {
   isRelevantTabUpdate,
   serviceMatchPatterns,
   targetDisplayName,
-  summarizeDispatch
+  summarizeDispatch,
+  supportedTargets,
 } from "./shared.js";
 
 const LEGACY_DEFAULTS = {
   services: { meet: true, teams: true, zoom: true },
   triggerMode: "ANY_TAB", // or ACTIVE_TAB
   listenerUrl: "",
-  direct: { enabled: false, ledBase: "", timeoutSec: 3, verifyStatus: false }
+  direct: { timeoutSec: 3 }
 };
 
 // New defaults
@@ -53,8 +54,7 @@ const DEFAULTS = {
   targets: [
     // Examples:
     // { id:"listener1", type:"listener", enabled:false, url:"http://127.0.0.1:8765/event?state={state}&service={service}&url={url}&ts={ts}" },
-    // { id:"tasmota1", type:"httpHook", enabled:false, onUrl:"http://192.168.1.17/cm?cmnd=Power%20On", offUrl:"http://192.168.1.17/cm?cmnd=Power%20Off", method:"GET", headers:[], body:"" },
-    // { id:"led1", type:"simpleLed", enabled:false, baseUrl:"http://192.168.1.50", verifyStatus:false }
+    // { id:"tasmota1", type:"httpHook", enabled:false, onUrl:"http://192.168.1.17/cm?cmnd=Power%20On", offUrl:"http://192.168.1.17/cm?cmnd=Power%20Off", method:"GET", headers:[], body:"" }
   ],
   customServices: []
 };
@@ -226,14 +226,10 @@ function migrateConfig(config) {
     cfg.includeMeetingUrl = !!config.includeMeetingUrl;
     cfg.customServices = normalizeCustomServices(config?.customServices, newId);
 
-    cfg.targets = cfg.targets.map(t => {
+    cfg.targets = supportedTargets(cfg.targets).map(t => {
       let tt = { ...t };
       tt.enabled = !!tt.enabled;
       if (!tt.id) tt.id = newId(tt.type || "t");
-      if (tt.type === "simpleLed") {
-        tt.baseUrl = trimSlash(tt.baseUrl || "");
-        tt.verifyStatus = !!tt.verifyStatus;
-      }
       if (tt.type === "listener") {
         tt.url = (tt.url || "").trim();
       }
@@ -259,8 +255,7 @@ function migrateConfig(config) {
         tt.modeOff = clampMode(tt.modeOff, 0);
         tt.localTimeoutMs = clampLocalTimeoutMs(tt.localTimeoutMs, 1500);
       }
-      // Fold legacy verifyStatus into the reconcile policy and clamp the
-      // mode to what this target type can support.
+      // Clamp the reconcile mode to what this target type can support.
       tt = migrateReconcile(tt);
       return tt;
     });
@@ -281,16 +276,6 @@ function migrateConfig(config) {
       type: "listener",
       enabled: true,
       url: legacy.listenerUrl.trim()
-    });
-  }
-
-  if (legacy.direct?.enabled && legacy.direct?.ledBase) {
-    targets.push({
-      id: newId("led"),
-      type: "simpleLed",
-      enabled: true,
-      baseUrl: trimSlash(legacy.direct.ledBase),
-      verifyStatus: !!legacy.direct.verifyStatus
     });
   }
 
@@ -478,30 +463,6 @@ async function runListenerTarget(target, vars, timeoutSec, signal) {
   return resultOf(res);
 }
 
-async function getLedStatus(baseUrl, timeoutSec, signal) {
-  try {
-    const r = await callUrl(baseUrl + "/led/status", timeoutSec, { signal });
-    return r.ok ? "REACHABLE" : "UNREACHABLE";
-  } catch {
-    return "UNREACHABLE";
-  }
-}
-
-async function runSimpleLedTarget(target, vars, timeoutSec, signal) {
-  if (!target?.enabled || !target?.baseUrl) return { skipped: true };
-  const base = trimSlash(target.baseUrl);
-  // Reachability gating now lives in the `verify` reconcile path
-  // (reconcileTarget); the edge always attempts the set.
-  const path = vars.state === "ON" ? "/led/on" : "/led/off";
-  const res = await callUrl(base + path, timeoutSec, { signal }).catch(() => NETWORK_ERROR);
-  return resultOf(res);
-}
-
-async function ledReachable(target, timeoutSec, signal) {
-  const st = await getLedStatus(trimSlash(target.baseUrl), timeoutSec, signal);
-  return st === "REACHABLE";
-}
-
 function buildAuthHeader(basicAuth) {
   if (!basicAuth || (!basicAuth.user && !basicAuth.pass)) return null;
   const token = btoa(`${basicAuth.user || ""}:${basicAuth.pass || ""}`);
@@ -530,6 +491,11 @@ async function runHttpHookTarget(target, vars, timeoutSec, signal) {
   if (method !== "GET" && method !== "HEAD") {
     const rendered = applyTemplate(bodyTpl, vars, bodyEncodingFor(bodyTpl));
     if (rendered.length) body = rendered;
+    // A JSON body without an explicit Content-Type would go out as
+    // text/plain, which many webhook receivers reject.
+    if (body && bodyEncodingFor(bodyTpl) === "json" && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
   }
 
   // Fix 4: evaluate the response with the SAME rules the options Test
@@ -661,7 +627,6 @@ async function dispatchTarget(t, vars, timeoutSec, signal) {
   const t0 = Date.now();
   let res = { skipped: true };
   if (t.type === "listener") res = await runListenerTarget(t, vars, timeoutSec, signal);
-  else if (t.type === "simpleLed") res = await runSimpleLedTarget(t, vars, timeoutSec, signal);
   else if (t.type === "httpHook") res = await runHttpHookTarget(t, vars, timeoutSec, signal);
   else if (t.type === "iotHybrid") res = await runIotHybridTarget(t, vars, timeoutSec, signal);
   return { id: t.id, type: t.type, name: targetDisplayName(t), ...res, ms: Date.now() - t0 };
@@ -695,8 +660,8 @@ async function applySideEffects(next, cfg, reason = "") {
 
 // One target's reconcile step on the heartbeat. `single` never re-fires;
 // `always` blindly re-asserts; `verify` reads actual state and re-fires
-// only on drift (iotHybrid via /api/status) or when reachable (simpleLed,
-// whose /led/status is reachability-only). Returns a log-friendly record;
+// only on drift (iotHybrid via /api/status or the cloud shadow). Returns a
+// log-friendly record;
 // `noop:true` means nothing was sent.
 async function reconcileTarget(t, vars, timeoutSec, signal) {
   const mode = resolveReconcile(t);
@@ -717,13 +682,6 @@ async function reconcileTarget(t, vars, timeoutSec, signal) {
       return { ...r, action: "remediate", drift: true, actual };
     }
     return { id: t.id, type: t.type, action: "verify", noop: true, drift, actual };
-  }
-  if (t.type === "simpleLed") {
-    if (await ledReachable(t, timeoutSec, signal)) {
-      const r = await dispatchTarget(t, vars, timeoutSec, signal);
-      return { ...r, action: "reassert" };
-    }
-    return { id: t.id, type: t.type, action: "verify", noop: true, reachable: false };
   }
   return { id: t.id, type: t.type, action: "verify", noop: true };
 }

@@ -58,9 +58,8 @@ docs/, resources/  Documentation and store assets
   on drift), `always` (blind re-assert). `verify` for iotHybrid reads
   `/api/status` on the LAN (`readIotLocalMode` + `parseDeviceMode`) and falls
   back to the cloud bridge's shadow read (`readIotCloudMode` → `GET ?thing=…` →
-  `parseCloudStateMode`) when off-network; simpleLed uses `/led/status`
-  reachability; drift via `reconcileDrift`. `reconcilePass()` runs only on
-  `reason === "alarm"`. Legacy `simpleLed.verifyStatus` migrates to `reconcile`.
+  `parseCloudStateMode`) when off-network; drift via `reconcileDrift`.
+  `reconcilePass()` runs only on `reason === "alarm"`.
   (Cloud readback is served by the firmware Device Shadow + Lambda GET in the
   `onair-led-sign-firmware` repo.)
 - **Diagnostics:** an opt-in ring buffer (`activityLog` in `storage.local`, cap
@@ -116,6 +115,15 @@ docs/, resources/  Documentation and store assets
   (secret query params, userinfo, HA/Slack/Discord/IFTTT webhook URLs). Secret
   URLs (`listener.url`, `httpHook.onUrl/offUrl`) are split into
   `secrets[id].urls`; `loadConfig` moves any secrets it finds in sync to local.
+- **Target types** are `listener`, `httpHook`, `iotHybrid` (`TARGET_TYPES`).
+  The old-firmware `simpleLed` type was removed; `supportedTargets` drops any
+  saved target of another type when the config loads.
+- **Add row:** ON-AIR sign / Webhook / Listener buttons, then one button per `TEMPLATES` entry in options.js (Tasmota, Shelly,
+  Home Assistant, Ntfy push — pre-filled Webhooks, built by
+  `populateTemplateButtons`). Fill-in parts are `YOUR_*` —
+  `findPlaceholders` turns them into card warnings and `originPatternFor`
+  skips placeholder hosts. JSON bodies get `Content-Type: application/json`
+  unless a header sets one.
 - **Options Test buttons** send `TEST_TARGET` to the worker, which runs the
   live `dispatchTarget` — there is no separate test executor in options.js.
   The worker ignores messages whose `sender.id` isn't this extension.
