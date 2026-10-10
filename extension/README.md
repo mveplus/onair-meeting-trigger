@@ -234,7 +234,7 @@ scripts/build-zip.sh      # dist.zip of this folder
 ```
 
 Releases: see the [repository README](../README.md#releasing). Version history:
-[GitHub Releases](https://github.com/mveplus/onair-meeting-trigger/releases).
+[CHANGELOG.md](../CHANGELOG.md).
 
 ## More
 

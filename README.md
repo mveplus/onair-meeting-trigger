@@ -37,7 +37,9 @@ local or LAN automations (ON-AIR sign, Home Assistant, Tasmota, Shelly, phone pu
 
 Releases are automated via GitHub Actions.
 
-To publish a new version:
+To publish a new version, first move the **Unreleased** notes in
+[CHANGELOG.md](CHANGELOG.md) under a new `## [X.Y.Z] — YYYY-MM-DD` heading
+(and update the compare links), commit, then:
 ```bash
 ./scripts/release.sh X.Y.Z
 ```

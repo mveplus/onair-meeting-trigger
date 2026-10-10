@@ -24,6 +24,7 @@ scripts/           Release tooling (build-zip.sh, release.sh, gen-build-info.sh)
                    + make-store-shots.sh (Chrome Web Store tiles)
 .github/workflows/release.yml   Tag-triggered release + Chrome Web Store upload
 VERSION            Mirror of manifest version, bumped by release.sh
+CHANGELOG.md       Keep-a-Changelog history; [Unreleased] collects merged PRs
 docs/, resources/  Documentation and store assets
 ```
 
@@ -141,6 +142,10 @@ Releases are cut from a SemVer git tag `vX.Y.Z`. The whole flow is two parts: a 
 bumps + tags, and a GitHub Actions workflow that builds and publishes on the pushed tag.
 
 ### Cut a release
+
+First update `CHANGELOG.md`: move the `[Unreleased]` entries under
+`## [X.Y.Z] — YYYY-MM-DD`, add the compare link, and commit (release.sh
+refuses a dirty tree). Add entries to `[Unreleased]` as PRs land.
 
 ```bash
 # From repo root, with a clean working tree:
