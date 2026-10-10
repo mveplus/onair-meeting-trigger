@@ -74,10 +74,43 @@ if [[ $RESUME -eq 0 ]]; then
 fi
 
 # --- changelog -----------------------------------------------------------
+# Promote the [Unreleased] notes to "## [X.Y.Z] — today" (and fix the
+# compare links) unless a section for this version is already there. The
+# file is only written for a real run; it goes into the release commit.
+CHANGELOG_PY='
+import re, sys, datetime
+from pathlib import Path
+ver, write = sys.argv[1], sys.argv[2] == "1"
+p = Path("CHANGELOG.md")
+s = p.read_text(encoding="utf-8")
+if re.search(r"^## \[" + re.escape(ver) + r"\]", s, re.M):
+    print("has"); sys.exit(0)
+m = re.search(r"^## \[Unreleased\][^\n]*\n(.*?)(?=^## \[)", s, re.M | re.S)
+if not m:
+    print("no-unreleased"); sys.exit(0)
+notes = m.group(1).strip("\n")
+notes = re.sub(r"\n{3,}", "\n\n", notes)
+count = sum(1 for l in notes.splitlines() if l.startswith("- "))
+body = notes if notes.strip() else "_No notable changes._"
+date = datetime.date.today().isoformat()
+s = s[:m.start()] + f"## [Unreleased]\n\n## [{ver}] — {date}\n\n{body}\n\n" + s[m.end():]
+link = re.search(r"^\[Unreleased\]: (\S+)/compare/(v[\d.]+)\.\.\.HEAD$", s, re.M)
+if link:
+    base, prev = link.group(1), link.group(2)
+    s = s.replace(link.group(0),
+        f"[Unreleased]: {base}/compare/v{ver}...HEAD\n[{ver}]: {base}/compare/{prev}...v{ver}")
+if write:
+    p.write_text(s, encoding="utf-8")
+print(f"moved {count}")
+'
 if [[ -f CHANGELOG.md ]]; then
-  grep -qE "^## \[$VER\]" CHANGELOG.md || die "CHANGELOG.md has no '## [$VER] — YYYY-MM-DD' section.
-  Move the [Unreleased] notes under it (and add the compare link), commit, then re-run."
-  ok "CHANGELOG.md has a $VER section"
+  CL="$(python3 -c "$CHANGELOG_PY" "$VER" 0)"
+  case "$CL" in
+    has)           ok "CHANGELOG.md already has a $VER section" ;;
+    no-unreleased) die "CHANGELOG.md has no '## [Unreleased]' section to promote" ;;
+    "moved 0")     ok "CHANGELOG.md: [Unreleased] is empty — $VER will say 'No notable changes'" ;;
+    moved*)        ok "CHANGELOG.md: ${CL#moved } [Unreleased] entr$([[ ${CL#moved } == 1 ]] && echo y || echo ies) → [$VER] — $(date +%F)" ;;
+  esac
 fi
 
 # --- tests ---------------------------------------------------------------
@@ -105,6 +138,10 @@ data["version"] = ver
 m.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 Path("VERSION").write_text(ver + "\n", encoding="utf-8")
 PY
+  if [[ -f CHANGELOG.md && "$CL" == moved* ]]; then
+    python3 -c "$CHANGELOG_PY" "$VER" 1 >/dev/null
+    git add CHANGELOG.md
+  fi
   git add extension/manifest.json VERSION
   git commit -q -m "Release $TAG"
   ok "Committed 'Release $TAG'"

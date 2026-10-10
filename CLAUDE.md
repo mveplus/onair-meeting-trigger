@@ -143,9 +143,8 @@ bumps + tags, and a GitHub Actions workflow that builds and publishes on the pus
 
 ### Cut a release
 
-First update `CHANGELOG.md`: move the `[Unreleased]` entries under
-`## [X.Y.Z] — YYYY-MM-DD`, add the compare link, and commit + push to main.
-Add entries to `[Unreleased]` as PRs land.
+Add entries to `CHANGELOG.md` → `[Unreleased]` as PRs land; release.sh
+promotes them to the new version.
 
 ```bash
 scripts/release.sh --dry-run 0.8.1   # checks only, changes nothing
@@ -155,11 +154,13 @@ scripts/release.sh 0.8.1
 `scripts/release.sh [--dry-run] <X.Y.Z>`:
 
 1. Checks: on `main`, clean tree, in sync with `origin/main`, tag free locally
-   **and** on origin, version newer than the manifest, `CHANGELOG.md` has a
-   `## [X.Y.Z]` section, `npm test` passes.
-2. Writes the version into `extension/manifest.json` and `VERSION`, commits
-   `Release vX.Y.Z`.
-3. Creates an **annotated** tag (`git tag -a -m`, so it works with
+   **and** on origin, version newer than the manifest, `npm test` passes.
+2. Moves `CHANGELOG.md`'s `[Unreleased]` notes under `## [X.Y.Z] — today`
+   and fixes the compare links (skipped if a `## [X.Y.Z]` section already
+   exists; an empty Unreleased becomes "No notable changes").
+3. Writes the version into `extension/manifest.json` and `VERSION`, commits
+   all three as `Release vX.Y.Z`.
+4. Creates an **annotated** tag (`git tag -a -m`, so it works with
    `tag.gpgsign=true`) and pushes `main` + that one tag atomically.
 
 Re-running with the same version after a failure resumes: if HEAD is already

@@ -37,14 +37,15 @@ local or LAN automations (ON-AIR sign, Home Assistant, Tasmota, Shelly, phone pu
 
 Releases are automated via GitHub Actions.
 
-To publish a new version, first move the **Unreleased** notes in
-[CHANGELOG.md](CHANGELOG.md) under a new `## [X.Y.Z] — YYYY-MM-DD` heading
-(and update the compare links), commit, then:
+Note changes under **Unreleased** in [CHANGELOG.md](CHANGELOG.md) as they
+land. To publish a new version:
 ```bash
+./scripts/release.sh --dry-run X.Y.Z   # optional: checks only
 ./scripts/release.sh X.Y.Z
 ```
 
 This will:
+- move the Unreleased notes in CHANGELOG.md under the new version
 - update extension/manifest.json and VERSION
 - commit the change
 - create a git tag (vX.Y.Z)
