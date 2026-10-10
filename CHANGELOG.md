@@ -7,6 +7,8 @@ auto-generated notes and the built `dist.zip`.
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-10-10
+
 ### Changed
 - Release workflow: the Chrome Web Store upload moves to the store's v2 API
   (v1.1 shuts down 2026-10-15) and checks the store first. If the previous
@@ -177,7 +179,8 @@ auto-generated notes and the built `dist.zip`.
 ### Fixed
 - Dark-theme coverage; settings inputs containing quotes (0.1.9).
 
-[Unreleased]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.5.1...v0.6.0
