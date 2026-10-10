@@ -17,6 +17,7 @@ import {
   exportFileName,
   formatBuildBadge,
   targetHost,
+  describeCustomService,
   describeTestResult,
   missingOrigins,
   settingsSignature,
@@ -371,35 +372,70 @@ function normalizeTargetFields(raw) {
   return null;
 }
 
+// Custom services use the same collapsed-card pattern as targets (U7):
+// a one-line summary (name · host · status), details on expand.
 function renderCustomServices(cfg) {
   const wrap = $("custom_services");
   wrap.innerHTML = "";
 
-  (cfg.customServices || []).forEach((s, idx) => {
+  (cfg.customServices || []).forEach((s) => {
     if (!s.id) s.id = newId("svc");
     const div = document.createElement("div");
-    div.className = "serviceItem";
+    const open = expanded.has(s.id);
+    div.className = `target serviceItem${open ? " open" : ""}${s.enabled ? "" : " disabled"}`;
     div.dataset.id = s.id;
 
     const prefixesText = (s.prefixes || []).join("\n");
 
     div.innerHTML = `
-      <div class="targetHead">
-        <div>
-          <b>${esc(s.name || "Custom service")}</b>
-        </div>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <label style="margin:0;"><input type="checkbox" class="s_enabled" ${s.enabled ? "checked":""}> Enabled</label>
-          <button class="danger s_remove">Remove</button>
+      <div class="targetSummary">
+        <button type="button" class="chev" aria-label="Show details" aria-expanded="${open}">▸</button>
+        <input type="checkbox" class="s_enabled" title="Enabled" aria-label="Enabled" ${s.enabled ? "checked":""}>
+        <span class="t_title"></span>
+        <span class="t_host muted"></span>
+        <span class="t_state"></span>
+      </div>
+      <div class="t_details">
+        <label>Name
+          <input type="text" class="s_name" maxlength="60" placeholder="Webex" value="${esc(s.name || "")}">
+          <span class="fieldHint">Shown in the popup while you're in a meeting.</span>
+        </label>
+        <label>Meeting URLs
+          <textarea class="s_prefixes" placeholder="https://webex.com/meet/">${esc(prefixesText)}</textarea>
+          <span class="fieldHint">One per line. A tab counts as a meeting when its address starts with one of these.</span>
+        </label>
+        <div class="detailFoot">
+          <div class="validation"></div>
+          <button type="button" class="danger small s_remove">Remove</button>
         </div>
       </div>
-      <label>Service name
-        <input type="text" class="s_name" placeholder="Example: Webex" value="${esc(s.name || "")}">
-      </label>
-      <label>URL prefixes (one per line)
-        <textarea class="s_prefixes" placeholder="https://example.com/meeting/">${esc(prefixesText)}</textarea>
-      </label>
     `;
+
+    for (const sel of [".chev", ".t_title", ".t_host"]) {
+      div.querySelector(sel).addEventListener("click", () => setExpanded(div, !div.classList.contains("open")));
+    }
+    div.querySelector(".s_enabled").addEventListener("change", e => {
+      div.classList.toggle("disabled", !e.target.checked);
+    });
+
+    // Keep the summary in step with the form; incomplete services are
+    // dropped on save, so say so before that happens.
+    const update = () => {
+      const d = describeCustomService({
+        name: div.querySelector(".s_name").value,
+        prefixes: div.querySelector(".s_prefixes").value.split("\n")
+      });
+      div.querySelector(".t_title").textContent = d.title;
+      div.querySelector(".t_host").textContent = d.host;
+      div.querySelector(".t_state").innerHTML = d.warnings.length
+        ? `<span class="badge warn">⚠ ${esc(d.warnings[0])}${d.warnings.length > 1 ? ` (+${d.warnings.length - 1})` : ""}</span>`
+        : `<span class="badge">Ready</span>`;
+      div.querySelector(".validation").innerHTML = d.warnings.length
+        ? d.warnings.map(msg => `<span class="badge warn">${esc(msg)}</span>`).join(" ") + ` <span class="muted">Not saved until fixed.</span>`
+        : "";
+    };
+    div.querySelectorAll("input, textarea").forEach(i => i.addEventListener("input", update));
+    update();
 
     div.querySelector(".s_remove").addEventListener("click", () => {
       readCustomServicesFromUI(cfg, { keepIncomplete: true });
@@ -413,6 +449,7 @@ function renderCustomServices(cfg) {
         onClick: () => {
           readCustomServicesFromUI(cfg, { keepIncomplete: true });
           cfg.customServices.splice(Math.min(at, cfg.customServices.length), 0, removed);
+          expanded.add(removed.id);
           renderCustomServices(cfg);
         }
       });
@@ -420,6 +457,9 @@ function renderCustomServices(cfg) {
 
     wrap.appendChild(div);
   });
+  $("add_custom_service").textContent = (cfg.customServices || []).length
+    ? "+ Add another service"
+    : "+ Add a custom service";
   refreshDirty();
 }
 
@@ -913,13 +953,13 @@ function addCustomService() {
   const cfg = window.__cfg;
   if (!cfg.customServices) cfg.customServices = [];
   readCustomServicesFromUI(cfg, { keepIncomplete: true });
-  cfg.customServices.push({
-    id: newId("svc"),
-    name: "",
-    enabled: true,
-    prefixes: []
-  });
+  const added = { id: newId("svc"), name: "", enabled: true, prefixes: [] };
+  cfg.customServices.push(added);
+  // Like targets: the new card opens expanded with the cursor in Name.
+  expanded.add(added.id);
   renderCustomServices(cfg);
+  const card = $("custom_services").querySelector(`.serviceItem[data-id="${CSS.escape(added.id)}"]`);
+  card?.querySelector(".s_name")?.focus();
 }
 
 function addTarget(type, templateKey = "") {
@@ -1283,6 +1323,7 @@ async function importHooksFromFile(file) {
     cfg.targets = [...(cfg.targets || []), ...normalizedTargets];
     if (customServices.length > 0) {
       cfg.customServices = [...(cfg.customServices || []), ...customServices];
+      for (const svc of customServices) expanded.add(svc.id);
       renderCustomServices(cfg);
     }
     renderTargets(cfg);
