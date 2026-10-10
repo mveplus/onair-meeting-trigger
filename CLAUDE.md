@@ -144,19 +144,27 @@ bumps + tags, and a GitHub Actions workflow that builds and publishes on the pus
 ### Cut a release
 
 First update `CHANGELOG.md`: move the `[Unreleased]` entries under
-`## [X.Y.Z] — YYYY-MM-DD`, add the compare link, and commit (release.sh
-refuses a dirty tree). Add entries to `[Unreleased]` as PRs land.
+`## [X.Y.Z] — YYYY-MM-DD`, add the compare link, and commit + push to main.
+Add entries to `[Unreleased]` as PRs land.
 
 ```bash
-# From repo root, with a clean working tree:
-scripts/release.sh 0.3.8
+scripts/release.sh --dry-run 0.8.1   # checks only, changes nothing
+scripts/release.sh 0.8.1
 ```
 
-`scripts/release.sh <version>` (version must be bare SemVer `X.Y.Z`, no leading `v`):
+`scripts/release.sh [--dry-run] <X.Y.Z>`:
 
-1. Refuses to run if the working tree is dirty or if tag `vX.Y.Z` already exists.
-2. Writes the version into `extension/manifest.json` and `VERSION`.
-3. Commits `Release vX.Y.Z`, creates tag `vX.Y.Z`, and pushes `main` + tags.
+1. Checks: on `main`, clean tree, in sync with `origin/main`, tag free locally
+   **and** on origin, version newer than the manifest, `CHANGELOG.md` has a
+   `## [X.Y.Z]` section, `npm test` passes.
+2. Writes the version into `extension/manifest.json` and `VERSION`, commits
+   `Release vX.Y.Z`.
+3. Creates an **annotated** tag (`git tag -a -m`, so it works with
+   `tag.gpgsign=true`) and pushes `main` + that one tag atomically.
+
+Re-running with the same version after a failure resumes: if HEAD is already
+`Release vX.Y.Z` it skips the bump and just tags + pushes. Never tag by hand —
+a tag without the manifest bump fails the workflow's version check.
 
 ### What the tag triggers (`.github/workflows/release.yml`)
 

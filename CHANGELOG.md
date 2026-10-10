@@ -15,6 +15,11 @@ auto-generated notes and the built `dist.zip`.
   **Upload to Chrome Web Store** workflow (Actions → Run workflow) uploads
   a release later. Needs the new `CWS_PUBLISHER_ID` secret.
 
+- `scripts/release.sh`: checks before changing anything (on `main`, in sync
+  with origin, tag unused locally and remotely, newer version, CHANGELOG
+  section, tests), `--dry-run`, annotated tags that work with signed-tag
+  setups, resumes after a failed tag/push, pushes only the new tag.
+
 ## [0.8.0] — 2026-10-10
 
 ### Added
