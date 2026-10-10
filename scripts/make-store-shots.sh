@@ -49,27 +49,43 @@ cat > "$SITE/mock-chrome.js" <<'MOCK'
   const SEED_CONFIG = {
     services: { meet: true, teams: true, zoom: true },
     triggerMode: "ANY_TAB", timeoutSec: 3, theme,
-    iconMode: "alwaysColor", includeMeetingUrl: false, customServices: [],
+    iconMode: "alwaysColor", includeMeetingUrl: false,
+    customServices: [
+      { id: "svc_webex", name: "Webex", enabled: true,
+        prefixes: ["https://webex.com/meet/", "https://example.webex.com/"] }
+    ],
     targets: [
-      { id: "iot_office", type: "iotHybrid", enabled: true,
-        localBase: "http://10.37.22.98", localToken: "device-api-token-9f3c",
+      { id: "iot_office", type: "iotHybrid", enabled: true, name: "Office sign",
+        localBase: "http://192.168.1.40", localToken: "device-api-token-9f3c",
         cloudBase: "https://k3f9qz.execute-api.eu-west-1.amazonaws.com",
         cloudToken: "bearer-7b21c0e4", thing: "onair-office-1",
-        modeOn: 1, modeOff: 0, localTimeoutMs: 1500 },
-      { id: "hook_homeassistant", type: "httpHook", enabled: true,
-        onUrl: "http://homeassistant.local:8123/api/webhook/ON_AIR_ON",
-        offUrl: "http://homeassistant.local:8123/api/webhook/ON_AIR_OFF",
-        method: "POST",
-        headers: [ { key: "Authorization", value: "Bearer eyJ0eXA–redacted" },
-                   { key: "Content-Type", value: "application/json" } ],
-        body: "{\"entity_id\":[\"light.office_sign\"]}",
-        basicAuth: null, checkStatus: true, statusCodes: [200, 204],
-        matchOn: "", matchOff: "" },
-      { id: "listener_local", type: "listener", enabled: true,
-        url: "http://127.0.0.1:8765/event?state={state}&service={service}" }
+        modeOn: 1, modeOff: 0, localTimeoutMs: 1500, reconcile: "verify" },
+      { id: "hook_lamp", type: "httpHook", enabled: true, name: "Desk lamp",
+        onUrl: "http://192.168.1.17/cm?cmnd=Power%20On",
+        offUrl: "http://192.168.1.17/cm?cmnd=Power%20Off",
+        method: "GET", headers: [], body: "", basicAuth: null, checkStatus: true,
+        statusCodes: [200, 204], matchOn: "", matchOff: "" },
+      { id: "hook_homeassistant", type: "httpHook", enabled: true, name: "Home Assistant",
+        onUrl: "http://192.168.1.10:8123/api/webhook/onair-office-on",
+        offUrl: "http://192.168.1.10:8123/api/webhook/onair-office-off",
+        method: "POST", headers: [], body: "", basicAuth: null, checkStatus: true,
+        statusCodes: [200, 204], matchOn: "", matchOff: "" },
+      { id: "hook_ntfy", type: "httpHook", enabled: true, name: "Ntfy push",
+        onUrl: "https://ntfy.sh/onair-demo/publish?title=ON-AIR",
+        offUrl: "https://ntfy.sh/onair-demo/publish?title=OFF-AIR",
+        method: "GET", headers: [], body: "", basicAuth: null, checkStatus: true,
+        statusCodes: [200], matchOn: "", matchOff: "" }
     ]
   };
   const SEED_STATE = { state: "ON", service: "meet", pause: { until: 0 } };
+  // Last edge's outcome, for the popup's "did it work?" health line.
+  const SEED_SESSION = { lastDispatch: { ts: Date.now() - 120000, to: "ON", total: 4, failed: [] } };
+  function getSession(req) {
+    const out = {};
+    const keys = Array.isArray(req) ? req : Object.keys(req || {});
+    for (const k of keys) out[k] = k in SEED_SESSION ? SEED_SESSION[k] : (req && !Array.isArray(req) ? req[k] : undefined);
+    return Promise.resolve(out);
+  }
   function get(req) {
     const out = {};
     const keys = Array.isArray(req) ? req : Object.keys(req || {});
@@ -83,20 +99,31 @@ cat > "$SITE/mock-chrome.js" <<'MOCK'
   const noopListener = { addListener() {}, removeListener() {} };
   window.chrome = {
     storage: { sync: { get, set: () => Promise.resolve() },
-               local: { get, set: () => Promise.resolve() }, onChanged: noopListener },
+               local: { get, set: () => Promise.resolve() },
+               session: { get: getSession, set: () => Promise.resolve() }, onChanged: noopListener },
     runtime: {
       sendMessage: (msg) => Promise.resolve(msg && msg.type === "GET_STATE" ? SEED_STATE : null),
       onMessage: noopListener, getURL: (p) => p,
       getManifest: () => ({ version: "0.0.0" }), openOptionsPage: () => {}, lastError: null },
-    permissions: { request: () => Promise.resolve(true), contains: () => Promise.resolve(true),
+    permissions: { getAll: () => Promise.resolve({ origins: ["<all_urls>"] }),
+                   request: () => Promise.resolve(true), contains: () => Promise.resolve(true),
                    remove: () => Promise.resolve(true) },
     tabs: { query: () => Promise.resolve([]), create: () => Promise.resolve({}) }
   };
   document.addEventListener("DOMContentLoaded", () => {
     const s = document.createElement("style");
-    s.textContent = "#savebar{display:none!important}#build_badge{display:none!important}#icon_hint{display:none!important}";
+    // Transitions off: elements present before the theme is applied would
+    // otherwise be captured mid-fade from the light colours.
+    s.textContent = "*{transition:none!important}#savebar{display:none!important}#build_badge{display:none!important}#icon_hint{display:none!important}";
     document.head.appendChild(s);
   });
+  // ?view=iot: just the Targets card with the ON-AIR sign expanded (tile 3).
+  if (params.get("view") === "iot") {
+    window.addEventListener("load", () => setTimeout(() => {
+      document.querySelectorAll(".hero, .card:not(#targets_card)").forEach(el => { el.style.display = "none"; });
+      document.querySelector('#targets .target[data-id="iot_office"] .chev')?.click();
+    }, 300));
+  }
 })();
 MOCK
 
@@ -118,7 +145,7 @@ shot() {
 shot popup_light   280,330   "popup.html?theme=light"
 shot popup_dark    280,330   "popup.html?theme=dark"
 shot options_light 1100,1480 "options.html?theme=light"
-shot options_dark  1100,1480 "options.html?theme=dark"
+shot options_dark  1100,1480 "options.html?theme=dark&view=iot"
 
 for f in popup_light popup_dark options_light options_dark; do
   magick "$RAW/$f.png" -trim +repage "$PROC/$f.png"
@@ -194,7 +221,7 @@ magick t2_bg.png t2_h.png -gravity North -geometry +0+48 -composite \
 
 # 3 — options IoT (dark)
 bg t3_bg.png
-magick "$PROC/options_dark.png" -crop 2200x1400+0+1500 +repage t3_src.png
+magick "$PROC/options_dark.png" -crop 2200x1400+0+0 +repage t3_src.png
 card t3_src.png 760 20 '#4d7a87' t3_card.png
 htext t3_h.png 1120 44 "$TXT" "Local-first on your LAN, cloud when you roam"
 magick t3_bg.png t3_h.png -gravity North -geometry +0+48 -composite \
