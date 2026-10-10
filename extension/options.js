@@ -18,6 +18,8 @@ import {
   formatBuildBadge,
   targetHost,
   describeCustomService,
+  supportedTargets,
+  findPlaceholders,
   describeTestResult,
   missingOrigins,
   settingsSignature,
@@ -40,134 +42,58 @@ const DEFAULTS = {
 };
 
 const KNOWN_STATUS_CODES = [200, 202, 204, 401, 403];
+// Presets shown as extra buttons on the Add row (after the target types) —
+// one-click Webhooks for common devices and services. Parts you must fill in are written
+// as YOUR_* — findPlaceholders() flags them, so the card says what's left to
+// do instead of showing "Ready".
+const hookDefaults = () => ({
+  type: "httpHook", method: "GET", headers: [], body: "", basicAuth: null,
+  checkStatus: true, statusCodes: [...DEFAULT_STATUS_CODES], matchOn: "", matchOff: ""
+});
+
 const TEMPLATES = {
   tasmota: {
-    label: "Tasmota (GET)",
+    label: "Tasmota",
+    name: "Tasmota",
+    hint: "Tasmota smart plug or relay (HTTP GET)",
     target: {
-      type: "httpHook",
-      onUrl: "http://192.168.1.17/cm?cmnd=Power%20On",
-      offUrl: "http://192.168.1.17/cm?cmnd=Power%20Off",
-      method: "GET",
-      headers: [],
-      body: "",
-      basicAuth: null,
-      checkStatus: true,
-      statusCodes: [...DEFAULT_STATUS_CODES],
-      matchOn: "",
-      matchOff: ""
+      ...hookDefaults(),
+      onUrl: "http://YOUR_DEVICE_IP/cm?cmnd=Power%20On",
+      offUrl: "http://YOUR_DEVICE_IP/cm?cmnd=Power%20Off"
     }
   },
   shelly: {
-    label: "Shelly (GET)",
+    // /relay/0 works on Gen1 and (as a compatibility endpoint) Gen2+.
+    label: "Shelly",
+    name: "Shelly",
+    hint: "Shelly plug or relay, Gen1 and Gen2+ (HTTP GET)",
     target: {
-      type: "httpHook",
-      onUrl: "http://192.168.1.10/relay/0?turn=on",
-      offUrl: "http://192.168.1.10/relay/0?turn=off",
-      method: "GET",
-      headers: [],
-      body: "",
-      basicAuth: null,
-      checkStatus: true,
-      statusCodes: [...DEFAULT_STATUS_CODES],
-      matchOn: "",
-      matchOff: ""
+      ...hookDefaults(),
+      onUrl: "http://YOUR_DEVICE_IP/relay/0?turn=on",
+      offUrl: "http://YOUR_DEVICE_IP/relay/0?turn=off"
     }
   },
   home_assistant: {
-    label: "Home Assistant Webhook",
+    // Webhook triggers need no token (the webhook ID is the secret) and
+    // accept POST by default; the automation decides what to switch.
+    label: "Home Assistant",
+    name: "Home Assistant",
+    hint: "Home Assistant automation via webhook (POST, no token)",
     target: {
-      type: "httpHook",
-      onUrl: "http://homeassistant.local:8123/api/webhook/ON_AIR_ON",
-      offUrl: "http://homeassistant.local:8123/api/webhook/ON_AIR_OFF",
+      ...hookDefaults(),
       method: "POST",
-      headers: [
-        { key: "Authorization", value: "Bearer YOUR_LONG_LIVED_ACCESS_TOKEN" },
-        { key: "Content-Type", value: "application/json" }
-      ],
-      body: "{\"entity_id\":[\"light.wiz_rgbw_tunable_4c105a\"]}",
-      basicAuth: null,
-      checkStatus: true,
-      statusCodes: [...DEFAULT_STATUS_CODES],
-      matchOn: "",
-      matchOff: ""
-    }
-  },
-  json_post: {
-    label: "Generic JSON (POST)",
-    target: {
-      type: "httpHook",
-      onUrl: "http://example.local/on",
-      offUrl: "http://example.local/off",
-      method: "POST",
-      headers: [{ key: "Content-Type", value: "application/json" }],
-      body: "{\"state\":\"{state}\",\"service\":\"{service}\",\"url\":\"{url}\",\"ts\":\"{ts}\"}",
-      basicAuth: null,
-      checkStatus: true,
-      statusCodes: [...DEFAULT_STATUS_CODES],
-      matchOn: "",
-      matchOff: ""
-    }
-  }
-  ,
-  api_access: {
-    label: "On-Air API",
-    target: {
-      type: "httpHook",
-      onUrl: "http://device.local/api/set?state=1",
-      offUrl: "http://device.local/api/set?state=0",
-      method: "GET",
-      headers: [{ key: "X-API-Token", value: "REPLACE_WITH_TOKEN" }],
-      body: "",
-      basicAuth: null,
-      checkStatus: true,
-      statusCodes: [...DEFAULT_STATUS_CODES],
-      matchOn: "",
-      matchOff: ""
+      onUrl: "http://YOUR_HA_HOST:8123/api/webhook/YOUR_ON_WEBHOOK_ID",
+      offUrl: "http://YOUR_HA_HOST:8123/api/webhook/YOUR_OFF_WEBHOOK_ID"
     }
   },
   ntfy: {
-    label: "ntfy.sh",
+    label: "Ntfy push",
+    name: "Ntfy push",
+    hint: "Push notification to your phone via ntfy.sh",
     target: {
-      type: "httpHook",
+      ...hookDefaults(),
       onUrl: "https://ntfy.sh/YOUR_TOPIC/publish?title=%F0%9F%93%9E%20ON-AIR&message=Do%20not%20disturb%2C%20in%20a%20meeting&priority=urgent",
-      offUrl: "https://ntfy.sh/YOUR_TOPIC/publish?title=%E2%9C%85%20OFF-AIR&message=Meeting%20ended&priority=low",
-      method: "GET",
-      headers: [],
-      body: "",
-      basicAuth: null,
-      checkStatus: true,
-      statusCodes: [...DEFAULT_STATUS_CODES],
-      matchOn: "",
-      matchOff: ""
-    }
-  },
-  aws_iot_hybrid: {
-    // Local-first hybrid: tries the device's local HTTP API first
-    // (~30 ms on LAN) and falls back to the AWS IoT cloud bridge on
-    // failure or timeout. This is the single-row equivalent of
-    // enabling both "On-Air API" and a cloud bridge in
-    // parallel, but with proper fall-through semantics so the device
-    // receives exactly one command per event.
-    //
-    // The string fields here are intentionally empty: the inputs in
-    // renderTargets carry their own `placeholder="…"` hints in grey,
-    // so adding from this template gives the user empty fields plus
-    // example text, instead of pre-populated REPLACE_WITH_* literals
-    // that would otherwise leak straight into an Export Settings
-    // file if the user didn't actually overtype them. The mode and
-    // timeout defaults stay populated because those ARE the real
-    // defaults, not placeholders.
-    label: "OnAir IoT — local first, AWS fallback",
-    target: {
-      type: "iotHybrid",
-      localBase: "",
-      localToken: "",
-      cloudBase: "",
-      cloudToken: "",
-      thing: "",
-      modeOn: 1,
-      modeOff: 0,
-      localTimeoutMs: 1500
+      offUrl: "https://ntfy.sh/YOUR_TOPIC/publish?title=%E2%9C%85%20OFF-AIR&message=Meeting%20ended&priority=low"
     }
   }
 };
@@ -210,6 +136,7 @@ function migrateIfNeeded(config) {
     const cfg = { ...DEFAULTS, ...config };
     cfg.services = { ...DEFAULTS.services, ...(config?.services || {}) };
     cfg.customServices = normalizeCustomServices(config?.customServices, newId);
+    cfg.targets = supportedTargets(cfg.targets);
     return cfg;
   }
 
@@ -219,15 +146,6 @@ function migrateIfNeeded(config) {
 
   if (legacy.listenerUrl && legacy.listenerUrl.trim()) {
     targets.push({ id: newId("listener"), type:"listener", enabled:true, url: legacy.listenerUrl.trim() });
-  }
-  if (legacy.direct?.enabled && legacy.direct?.ledBase) {
-    targets.push({
-      id: newId("led"),
-      type:"simpleLed",
-      enabled:true,
-      baseUrl: trimSlash(legacy.direct.ledBase),
-      verifyStatus: !!legacy.direct.verifyStatus
-    });
   }
 
   return {
@@ -270,7 +188,6 @@ function getOriginsFromTargets(cfg, { includeDisabled = false } = {}) {
   for (const t of cfg.targets || []) {
     if (!t.enabled && !includeDisabled) continue;
     if (t.type === "listener" && t.url) urls.push(t.url);
-    if (t.type === "simpleLed" && t.baseUrl) urls.push(t.baseUrl + "/");
     if (t.type === "httpHook") {
       if (t.onUrl) urls.push(t.onUrl);
       if (t.offUrl) urls.push(t.offUrl);
@@ -309,17 +226,6 @@ function normalizeTargetFields(raw) {
     const url = String(raw?.url || "").trim();
     if (!url) return null;
     return { id: newId("listener"), type: "listener", enabled: raw?.enabled !== false, url };
-  }
-  if (type === "simpleLed") {
-    const baseUrl = trimSlash(String(raw?.baseUrl || "").trim());
-    if (!baseUrl) return null;
-    return {
-      id: newId("led"),
-      type: "simpleLed",
-      enabled: raw?.enabled !== false,
-      baseUrl,
-      verifyStatus: !!raw?.verifyStatus
-    };
   }
   if (type === "iotHybrid") {
     const localBase = trimSlash(String(raw?.localBase || "").trim());
@@ -500,7 +406,6 @@ function shouldOpenAdvanced(hook) {
 // Fallback title for a target the user hasn't named.
 function defaultLabel(t) {
   return t.type === "listener" ? "Listener"
-    : t.type === "simpleLed" ? "LED sign"
     // A cloud-only iotHybrid (no local URL) is just the AWS bridge; only
     // call it "local + cloud" once a LAN path is actually configured.
     : t.type === "iotHybrid" ? (t.localBase ? "ON-AIR sign (local + cloud)" : "ON-AIR sign (cloud)")
@@ -524,7 +429,7 @@ function renderTargets(cfg) {
   if (!(cfg.targets || []).length) {
     const empty = document.createElement("div");
     empty.className = "emptyTargets";
-    empty.textContent = "No targets yet — add your ON-AIR sign, an LED, or a webhook above.";
+    empty.textContent = "No targets yet — add your ON-AIR sign or a webhook above.";
     wrap.appendChild(empty);
     refreshDirty();
     return;
@@ -576,13 +481,6 @@ function renderTargets(cfg) {
         </label>
         <div class="muted">You can use tokens: <code>{state}</code> <code>{service}</code> <code>{url}</code> <code>{ts}</code> (values are URL-encoded)</div>
         <div class="muted" style="margin-top:8px;">If you don&#39;t use tokens, the extension will append <code>?state=..&amp;service=..&amp;url=..&amp;ts=..</code> automatically (backward compatible).</div>
-      `;
-    } else if (t.type === "simpleLed") {
-      body.innerHTML = `
-        <label>Base URL
-          <input type="text" class="t_baseUrl" placeholder="http://192.168.1.50" value="${esc(t.baseUrl || "")}">
-        </label>
-        <div class="muted">Uses <code>/led/on</code>, <code>/led/off</code>, optional <code>/led/status</code>.</div>
       `;
     } else if (t.type === "iotHybrid") {
       const modeOpts = [[0, "Off"], [1, "On"], [2, "Breathing"]];
@@ -733,7 +631,6 @@ const RECONCILE_LABELS = {
 
 function reconcileHint(type) {
   if (type === "httpHook") return "Fires on the meeting edge only. Pick “Re-assert” only for idempotent devices — never for notifications.";
-  if (type === "simpleLed") return "“Verify” pings /led/status and re-sends on/off when reachable. “Re-assert” re-sends every minute regardless.";
   if (type === "iotHybrid") return "“Verify” reads the device’s actual state and re-sends only if it drifted — via /api/status on the LAN, falling back to the cloud bridge’s shadow read when off-network. “Re-assert” re-sends every minute regardless.";
   return "";
 }
@@ -783,9 +680,6 @@ function validateTargetNode(node, t) {
   if (t.type === "listener") {
     const url = node.querySelector(".t_url")?.value.trim() || "";
     if (!url) warnings.push("Listener URL is empty");
-  } else if (t.type === "simpleLed") {
-    const base = node.querySelector(".t_baseUrl")?.value.trim() || "";
-    if (!base) warnings.push("LED base URL is empty");
   } else if (t.type === "iotHybrid") {
     const localBase = node.querySelector(".t_localBase")?.value.trim() || "";
     const cloudBase = node.querySelector(".t_cloudBase")?.value.trim() || "";
@@ -802,6 +696,8 @@ function validateTargetNode(node, t) {
   // Fix 2: flag credentials about to travel over cleartext to a non-LAN
   // host. Built from the live field values so the warning appears as you
   // type, before Save.
+  const fields = [...node.querySelectorAll(".t_details input:not([type=checkbox]), .t_details textarea")].map(i => i.value);
+  for (const p of findPlaceholders(...fields)) warnings.push(`Replace ${p}`);
   warnings.push(...endpointSecurityWarnings(buildTargetFromNode(node, t)));
   return warnings;
 }
@@ -812,9 +708,6 @@ function buildTargetFromNode(node, t) {
 
   if (t.type === "listener") {
     base.url = node.querySelector(".t_url")?.value.trim() || "";
-  } else if (t.type === "simpleLed") {
-    base.baseUrl = trimSlash(node.querySelector(".t_baseUrl")?.value.trim() || "");
-    delete base.verifyStatus; // superseded by the reconcile policy
   } else if (t.type === "iotHybrid") {
     base.localBase = trimSlash(node.querySelector(".t_localBase")?.value.trim() || "");
     base.localToken = node.querySelector(".t_localToken")?.value.trim() || "";
@@ -974,40 +867,32 @@ function addTarget(type, templateKey = "") {
       enabled: true,
       url: "http://127.0.0.1:8765/event?state={state}&service={service}&url={url}&ts={ts}"
     });
-  } else if (type === "simpleLed") {
-    cfg.targets.push({
-      id: newId("led"),
-      type: "simpleLed",
-      enabled: true,
-      baseUrl: "",
-      verifyStatus: false
-    });
   } else if (type === "iotHybrid") {
-    const tpl = templateKey && TEMPLATES[templateKey] ? TEMPLATES[templateKey].target : null;
+    // String fields start empty; the inputs carry grey example hints, so no
+    // placeholder text can leak into an Export file. Mode/timeout values
+    // are the real defaults.
     cfg.targets.push({
       id: newId("iot"),
       type: "iotHybrid",
       enabled: true,
-      localBase: tpl?.localBase || "",
-      localToken: tpl?.localToken || "",
-      cloudBase: tpl?.cloudBase || "",
-      cloudToken: tpl?.cloudToken || "",
-      thing: tpl?.thing || "",
-      modeOn: tpl?.modeOn ?? 1,
-      modeOff: tpl?.modeOff ?? 0,
-      localTimeoutMs: tpl?.localTimeoutMs ?? 1500
+      localBase: "",
+      localToken: "",
+      cloudBase: "",
+      cloudToken: "",
+      thing: "",
+      modeOn: 1,
+      modeOff: 0,
+      localTimeoutMs: 1500
     });
   } else {
     // A template pre-fills the hook; the plain "Webhook" button starts blank.
-    const template = templateKey && TEMPLATES[templateKey] ? TEMPLATES[templateKey].target : {
-      type: "httpHook", onUrl: "", offUrl: "", method: "GET", headers: [], body: "", basicAuth: null,
-      checkStatus: true, statusCodes: [...DEFAULT_STATUS_CODES], matchOn: "", matchOff: ""
-    };
+    const template = templateKey && TEMPLATES[templateKey] ? structuredClone(TEMPLATES[templateKey].target)
+      : { ...hookDefaults(), onUrl: "", offUrl: "" };
     cfg.targets.push({
       id: newId("hook"),
       type: "httpHook",
       enabled: true,
-      name: templateKey && TEMPLATES[templateKey] ? TEMPLATES[templateKey].label.replace(/\s*\(.*\)$/, "") : "",
+      name: TEMPLATES[templateKey]?.name || "",
       ...template
     });
   }
@@ -1165,14 +1050,6 @@ function exportHooks() {
   const targets = sourceTargets.map(t => {
     if (t.type === "listener") {
       return { type: "listener", url: t.url || "", enabled: t.enabled !== false, reconcile: resolveReconcile(t) };
-    }
-    if (t.type === "simpleLed") {
-      return {
-        type: "simpleLed",
-        baseUrl: t.baseUrl || "",
-        enabled: t.enabled !== false,
-        reconcile: resolveReconcile(t)
-      };
     }
     if (t.type === "iotHybrid") {
       return {
@@ -1345,32 +1222,25 @@ document.addEventListener("input", refreshDirty);
 document.addEventListener("change", refreshDirty);
 
 $("add_custom_service").addEventListener("click", addCustomService);
-// U6: one click per target type; templates live in "More templates…",
-// which adds as soon as you pick one.
+// U6: one click per target type or template.
 document.querySelectorAll(".addBtn").forEach(btn => {
-  btn.addEventListener("click", () => addTarget(btn.dataset.add, btn.dataset.template || ""));
+  btn.addEventListener("click", () => addTarget(btn.dataset.add));
 });
-$("target_template").addEventListener("change", e => {
-  const key = e.target.value;
-  e.target.value = "";
-  if (!TEMPLATES[key]) return;
-  addTarget(TEMPLATES[key].target?.type || "httpHook", key);
-});
-
-// Build the "More templates…" <select> from the TEMPLATES object so
-// adding an entry is a single-file change.
-function populateTemplateDropdown() {
-  const sel = $("target_template");
-  if (!sel) return;
-  sel.innerHTML = '<option value="">More templates…</option>';
+// Template buttons are built from TEMPLATES so adding one is a
+// single-file change.
+function populateTemplateButtons() {
+  const row = document.querySelector(".addRow");
+  if (!row) return;
   for (const [key, def] of Object.entries(TEMPLATES)) {
-    const opt = document.createElement("option");
-    opt.value = key;
-    opt.textContent = def.label || key;
-    sel.appendChild(opt);
+    const b = document.createElement("button");
+    b.className = "addBtn";
+    b.textContent = def.label;
+    b.title = def.hint || "";
+    b.addEventListener("click", () => addTarget(def.target.type, key));
+    row.appendChild(b);
   }
 }
-populateTemplateDropdown();
+populateTemplateButtons();
 
 $("export_hooks").addEventListener("click", exportHooks);
 $("import_hooks").addEventListener("click", () => $("import_hooks_file").click());

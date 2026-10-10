@@ -60,6 +60,9 @@ import {
   targetDisplayName,
   targetHost,
   describeCustomService,
+  supportedTargets,
+  findPlaceholders,
+  originPatternFor,
   normalizePrefixes,
   describeTestResult,
   summarizeDispatch,
@@ -359,7 +362,7 @@ describe("Fix 1 (export decision): hasSecrets / resolveExportSecrets / exportFil
     { id: "iot1", type: "iotHybrid", localToken: "LT", cloudToken: "CT", cloudBase: "https://a", thing: "x" }
   ];
   const noSecrets = () => [
-    { id: "led1", type: "simpleLed", baseUrl: "http://192.168.1.5" }
+    { id: "l1", type: "listener", url: "http://192.168.1.5/e" }
   ];
 
   test("hasSecrets detects credential-bearing targets", () => {
@@ -512,7 +515,6 @@ describe("reconcile policy", () => {
   test("reconcileModesFor constrains modes by target type", () => {
     assert.deepEqual(reconcileModesFor("listener"), ["single"]);
     assert.deepEqual(reconcileModesFor("httpHook"), ["single", "always"]);
-    assert.deepEqual(reconcileModesFor("simpleLed"), ["single", "verify", "always"]);
     assert.deepEqual(reconcileModesFor("iotHybrid"), ["single", "verify", "always"]);
     assert.deepEqual(reconcileModesFor("bogus"), ["single"]);
   });
@@ -520,7 +522,6 @@ describe("reconcile policy", () => {
   test("resolveReconcile falls back to the type default when unset", () => {
     assert.equal(resolveReconcile({ type: "listener" }), "single");
     assert.equal(resolveReconcile({ type: "httpHook" }), "single");
-    assert.equal(resolveReconcile({ type: "simpleLed" }), "verify");
     assert.equal(resolveReconcile({ type: "iotHybrid" }), "verify");
   });
 
@@ -531,23 +532,19 @@ describe("reconcile policy", () => {
     assert.equal(resolveReconcile({ type: "httpHook", reconcile: "verify" }), "single");
     // a valid choice is honored
     assert.equal(resolveReconcile({ type: "httpHook", reconcile: "always" }), "always");
-    assert.equal(resolveReconcile({ type: "simpleLed", reconcile: "single" }), "single");
+    assert.equal(resolveReconcile({ type: "iotHybrid", reconcile: "single" }), "single");
   });
 
-  test("migrateReconcile folds legacy verifyStatus into reconcile", () => {
-    assert.equal(migrateReconcile({ type: "simpleLed", verifyStatus: true }).reconcile, "verify");
-    assert.equal(migrateReconcile({ type: "simpleLed", verifyStatus: false }).reconcile, "single");
-    // non-LED types get their default
+  test("migrateReconcile gives each type its default", () => {
     assert.equal(migrateReconcile({ type: "listener" }).reconcile, "single");
     assert.equal(migrateReconcile({ type: "iotHybrid" }).reconcile, "verify");
   });
 
   test("migrateReconcile is idempotent and honors an explicit reconcile", () => {
-    const once = migrateReconcile({ type: "simpleLed", verifyStatus: true });
+    const once = migrateReconcile({ type: "iotHybrid" });
     const twice = migrateReconcile(once);
     assert.equal(twice.reconcile, "verify");
-    // explicit reconcile wins over the legacy flag
-    assert.equal(migrateReconcile({ type: "simpleLed", reconcile: "single", verifyStatus: true }).reconcile, "single");
+    assert.equal(migrateReconcile({ type: "iotHybrid", reconcile: "single" }).reconcile, "single");
   });
 
   test("DEFAULT_RECONCILE never defaults a notification target to a re-firing mode", () => {
@@ -586,14 +583,14 @@ describe("device state readback", () => {
 
 describe("settingsSignature reconcile awareness", () => {
   const led = (reconcile) => ({
-    services: { meet: true }, targets: [{ id: "x", type: "simpleLed", enabled: true, baseUrl: "http://d", reconcile }]
+    services: { meet: true }, targets: [{ id: "x", type: "iotHybrid", enabled: true, cloudBase: "http://d", reconcile }]
   });
   test("changing a target's reconcile mode is a settings change", () => {
     assert.notEqual(settingsSignature(led("single")), settingsSignature(led("always")));
   });
   test("an unset reconcile signs identically to its resolved default", () => {
-    // simpleLed default is verify — unset and explicit-verify must match
-    const unset = { services: { meet: true }, targets: [{ id: "x", type: "simpleLed", enabled: true, baseUrl: "http://d" }] };
+    // iotHybrid default is verify — unset and explicit-verify must match
+    const unset = { services: { meet: true }, targets: [{ id: "x", type: "iotHybrid", enabled: true, cloudBase: "http://d" }] };
     assert.equal(settingsSignature(unset), settingsSignature(led("verify")));
   });
 });
@@ -767,17 +764,16 @@ describe("S3: redirect policy for credentialed requests", () => {
     assert.equal(redirectPolicyFor({ type: "httpHook", basicAuth: { user: "u", pass: "" } }), "error");
   });
 
-  test("listener / simpleLed follow redirects", () => {
+  test("listeners follow redirects", () => {
     assert.equal(redirectPolicyFor({ type: "listener" }), "follow");
-    assert.equal(redirectPolicyFor({ type: "simpleLed" }), "follow");
   });
 });
 
 describe("R1: superseded requests render as expected, not as failures", () => {
   test("superseded target is muted with a plain-English line", () => {
-    const t = { type: "simpleLed", ok: false, superseded: true, ms: 12 };
+    const t = { type: "listener", ok: false, superseded: true, ms: 12 };
     assert.equal(targetSeverity(t), "muted");
-    assert.equal(describeTargetLine(t).text, "LED sign cancelled — superseded by a newer change · 12 ms");
+    assert.equal(describeTargetLine(t).text, "Listener cancelled — superseded by a newer change · 12 ms");
     assert.equal(logSeverity({ kind: "edge", targets: [t] }), "muted");
   });
 });
@@ -914,7 +910,7 @@ describe("S5: import destinations", () => {
 
 describe("U7: target names and summaries", () => {
   test("user name wins, else a readable type", () => {
-    assert.equal(targetDisplayName({ type: "simpleLed", name: "  Office sign " }), "Office sign");
+    assert.equal(targetDisplayName({ type: "iotHybrid", name: "  Office sign " }), "Office sign");
     assert.equal(targetDisplayName({ type: "httpHook", name: "" }), "HTTP hook");
   });
 
@@ -922,12 +918,12 @@ describe("U7: target names and summaries", () => {
     assert.equal(targetHost({ type: "listener", url: "http://127.0.0.1:8765/e?s={state}" }), "127.0.0.1:8765");
     assert.equal(targetHost({ type: "httpHook", onUrl: "", offUrl: "https://ntfy.sh/t" }), "ntfy.sh");
     assert.equal(targetHost({ type: "iotHybrid", cloudBase: "https://api.aws.com" }), "api.aws.com");
-    assert.equal(targetHost({ type: "simpleLed", baseUrl: "" }), "");
+    assert.equal(targetHost({ type: "listener", url: "" }), "");
   });
 
   test("the name counts as an unsaved change", () => {
-    const a = { targets: [{ type: "simpleLed", baseUrl: "http://x", name: "A" }] };
-    const b = { targets: [{ type: "simpleLed", baseUrl: "http://x", name: "B" }] };
+    const a = { targets: [{ type: "listener", url: "http://x", name: "A" }] };
+    const b = { targets: [{ type: "listener", url: "http://x", name: "B" }] };
     assert.notEqual(settingsSignature(a), settingsSignature(b));
   });
 });
@@ -949,7 +945,7 @@ describe("U1: dispatch health", () => {
 
   test("summarizeDispatch ignores skipped / noop / superseded results", () => {
     const rec = summarizeDispatch([
-      { type: "simpleLed", name: "Sign", ok: true },
+      { type: "iotHybrid", name: "Sign", ok: true },
       { type: "listener", ok: false, error: "timeout" },
       { type: "httpHook", skipped: true },
       { type: "iotHybrid", noop: true },
@@ -1019,5 +1015,34 @@ describe("custom services", () => {
     assert.equal(d.host, "no URL yet");
     assert.deepEqual(d.warnings, ["Needs a name", "Not a valid URL: https://exa mple.com/"]);
     assert.deepEqual(describeCustomService({ name: "X", prefixes: [] }).warnings, ["Add a meeting URL"]);
+  });
+});
+
+describe("template placeholders", () => {
+  test("findPlaceholders lists unfilled YOUR_* parts once", () => {
+    assert.deepEqual(
+      findPlaceholders("http://YOUR_HA_HOST:8123/api/webhook/YOUR_ON_WEBHOOK_ID", "https://ntfy.sh/YOUR_TOPIC/x", "http://YOUR_HA_HOST/"),
+      ["YOUR_HA_HOST", "YOUR_ON_WEBHOOK_ID", "YOUR_TOPIC"]
+    );
+    assert.deepEqual(findPlaceholders("X-API-Token: REPLACE_WITH_TOKEN"), ["REPLACE_WITH_TOKEN"]);
+  });
+
+  test("findPlaceholders ignores real values", () => {
+    assert.deepEqual(findPlaceholders("http://your_house.lan/on", "https://ntfy.sh/my_topic", "", undefined), []);
+  });
+
+  test("originPatternFor skips hosts that are still placeholders", () => {
+    assert.equal(originPatternFor("http://YOUR_DEVICE_IP/cm?cmnd=Power%20On"), null);
+    assert.deepEqual(originPatternsFor(["http://YOUR_DEVICE_IP/x", "http://10.0.0.5/x"]), ["http://10.0.0.5/*"]);
+  });
+});
+
+describe("retired target types", () => {
+  test("supportedTargets drops simpleLed and unknown types", () => {
+    assert.deepEqual(
+      supportedTargets([{ type: "simpleLed", baseUrl: "http://x" }, { type: "httpHook" }, { type: "iotHybrid" }, null, { type: "bogus" }]).map(t => t.type),
+      ["httpHook", "iotHybrid"]
+    );
+    assert.deepEqual(supportedTargets(undefined), []);
   });
 });

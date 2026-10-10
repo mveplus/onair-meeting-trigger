@@ -41,18 +41,25 @@ export const RECONCILE_MODES = ["single", "verify", "always"];
 export const DEFAULT_RECONCILE = {
   listener: "single",
   httpHook: "single",
-  simpleLed: "verify",
   iotHybrid: "verify"
 };
+
+// Target types this build can run. Saved targets of any other type (e.g.
+// the retired `simpleLed`) are dropped when the config loads.
+export const TARGET_TYPES = ["listener", "httpHook", "iotHybrid"];
+
+export function supportedTargets(targets) {
+  return (Array.isArray(targets) ? targets : []).filter(t => TARGET_TYPES.includes(t?.type));
+}
 
 // Which reconcile modes a given target TYPE can actually support. The
 // options UI shows only these; anything else collapses to the type's
 // default. `verify` is offered only where a state/reachability readback
-// exists (simpleLed's /led/status, iotHybrid's /api/status).
+// exists (iotHybrid's /api/status, with the cloud shadow as fallback).
 export function reconcileModesFor(type) {
   if (type === "listener") return ["single"];              // notification only
   if (type === "httpHook") return ["single", "always"];    // no readback
-  if (type === "simpleLed" || type === "iotHybrid") return ["single", "verify", "always"];
+  if (type === "iotHybrid") return ["single", "verify", "always"];
   return ["single"];
 }
 
@@ -65,16 +72,11 @@ export function resolveReconcile(target) {
   return DEFAULT_RECONCILE[type] || "single";
 }
 
-// Fold the legacy simpleLed `verifyStatus` boolean into the reconcile
-// field: a target that had "verify status" turned on wanted its state
-// re-asserted, which is now `verify`; off means fire once (`single`).
-// Idempotent — leaves an already-migrated target untouched.
+// Give a target an explicit reconcile mode (its type's default when
+// unset), clamped to what the type supports. Idempotent.
 export function migrateReconcile(target) {
   const t = { ...target };
-  if (!t.reconcile) {
-    if (t.type === "simpleLed") t.reconcile = t.verifyStatus ? "verify" : "single";
-    else t.reconcile = DEFAULT_RECONCILE[t.type] || "single";
-  }
+  if (!t.reconcile) t.reconcile = DEFAULT_RECONCILE[t.type] || "single";
   t.reconcile = resolveReconcile(t);
   return t;
 }
@@ -94,7 +96,6 @@ export function modeLabel(n) {
 const TYPE_LABELS = {
   listener: "Listener",
   httpHook: "HTTP hook",
-  simpleLed: "LED sign",
   iotHybrid: "IoT sign"
 };
 
@@ -327,6 +328,19 @@ export function applyTemplate(str, vars = {}, encode = "none") {
 export function bodyEncodingFor(bodyTpl) {
   const s = String(bodyTpl ?? "").trim();
   return s.startsWith("{") || s.startsWith("[") ? "json" : "none";
+}
+
+// ---- template placeholders --------------------------------------------
+
+// Templates mark the parts you must fill in as YOUR_* (e.g. YOUR_TOPIC,
+// YOUR_DEVICE_IP). Upper-case only, so a real lower-case host/path that
+// happens to contain "your_" isn't flagged.
+const PLACEHOLDER_RE = /\b(?:YOUR|REPLACE_WITH)_[A-Z0-9_]*[A-Z0-9]\b/g;
+
+export function findPlaceholders(...texts) {
+  const out = new Set();
+  for (const t of texts) for (const m of String(t ?? "").matchAll(PLACEHOLDER_RE)) out.add(m[0]);
+  return [...out];
 }
 
 // ---- service matching --------------------------------------------------
@@ -797,7 +811,6 @@ export function describeMeetingState(state, service) {
 function canonTarget(t) {
   const base = { type: t.type, name: String(t.name || "").trim(), enabled: t.enabled !== false, reconcile: resolveReconcile(t) };
   if (t.type === "listener") return { ...base, url: t.url || "" };
-  if (t.type === "simpleLed") return { ...base, baseUrl: t.baseUrl || "" };
   if (t.type === "iotHybrid") {
     return {
       ...base,
@@ -853,6 +866,9 @@ export function isRelevantTabUpdate(changeInfo) {
 // `scheme://host[:port]/*` permission pattern for a URL (same shape the
 // options page has always requested), or null if unparseable.
 export function originPatternFor(url) {
+  // A template host that hasn't been filled in yet (YOUR_DEVICE_IP) is not
+  // a real origin — don't ask Chrome for access to it.
+  if (findPlaceholders(url).length) return null;
   try {
     const u = new URL(String(url).replace(/\{[a-z_]+\}/g, "x"));
     if (!/^https?:$/.test(u.protocol)) return null;
@@ -884,7 +900,7 @@ export function importDestinations(targets) {
   const hosts = new Set();
   const add = u => { try { hosts.add(new URL(String(u).replace(/\{[a-z_]+\}/g, "x")).host); } catch { /* skip */ } };
   for (const t of targets || []) {
-    for (const f of ["url", "onUrl", "offUrl", "baseUrl", "localBase", "cloudBase"]) {
+    for (const f of ["url", "onUrl", "offUrl", "localBase", "cloudBase"]) {
       if (t?.[f]) add(t[f]);
     }
   }
@@ -903,7 +919,6 @@ export function targetDisplayName(t) {
 // Template tokens are neutralized first so `…?s={state}` still parses.
 export function targetHost(t) {
   const url = t?.type === "listener" ? t.url
-    : t?.type === "simpleLed" ? t.baseUrl
     : t?.type === "iotHybrid" ? (t.localBase || t.cloudBase)
     : (t?.onUrl || t?.offUrl);
   if (!url) return "";

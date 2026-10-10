@@ -25,7 +25,7 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 - **Per-target reconcile modes** (fire-once / verify / re-assert) — keeps your sign in sync and self-heals a missed command, without duplicate notifications
 - Toolbar popup with at-a-glance ON-AIR status and one-click **Pause** (1 hour / until you resume)
 - Redesigned settings UI with an unsaved-changes save bar
-- Built-in templates for common targets, including the OnAir IoT local-first-with-AWS-fallback hybrid — pick solid or breathing from the ON-mode dropdown
+- One-click targets for the ON-AIR sign (local first, AWS fallback — solid or breathing), webhook and listener, plus templates for Tasmota, Shelly, Home Assistant and ntfy
 - Import/export settings (includes trigger mode, timeout, toolbar icon mode) — credentials are excluded from exports
 - Flatpak / Snap compatible
 - Privacy-first (no telemetry; tokens are stored in `chrome.storage.local` and never synced to your Google account; only the meeting site origin is shared by default — the full meeting URL/ID is sent only when you opt in)
