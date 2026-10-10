@@ -25,6 +25,7 @@ scripts/           Release tooling (build-zip.sh, release.sh, gen-build-info.sh,
                    + make-store-shots.sh (Chrome Web Store tiles)
 .github/workflows/release.yml   Tag-triggered release + Chrome Web Store upload
 VERSION            Mirror of manifest version, bumped by release.sh
+.claude/skills/release/  Release checklist skill (cut → watch CI → store results)
 CHANGELOG.md       Keep-a-Changelog history; [Unreleased] collects merged PRs
 docs/, resources/  Documentation and store assets
 ```
@@ -241,6 +242,29 @@ the secret, then use the manual upload workflow):
 ## Local build / smoke test
 
 ```bash
-scripts/build-zip.sh          # produces dist.zip from extension/
-# Load unpacked: chrome://extensions → Developer mode → Load unpacked → select extension/
+scripts/build-zip.sh          # produces dist.zip + dist-firefox.zip from extension/
+# Chrome:  chrome://extensions → Developer mode → Load unpacked → select extension/
+# Firefox: about:debugging → This Firefox → Load Temporary Add-on → dist-firefox.zip
+npx --yes web-ext@8 lint -s <unzipped dist-firefox.zip>   # AMO's validator, locally
 ```
+
+When a smoke test touches a real sign, close (or update) the extension in
+every other browser first — an old build in another browser still runs its
+heartbeat against the same sign and makes results look flaky.
+
+### Firefox / AMO gotchas (learned the hard way)
+
+- `tabs.query` still returns a closing tab (and a closing window's tabs)
+  while `onRemoved` listeners run — hence `withoutClosingTabs`. Expect more
+  "Chrome is instant, Firefox lags" bugs to be event-ordering differences.
+- The event page unloads when idle: "Service worker started" every minute in
+  Diagnostics is normal; anything held only in module globals is lost.
+- Don't add `browser_specific_settings.gecko_android`: AMO then ticks and
+  locks *Firefox for Android* compatibility. The resulting "Android 140 <
+  142 for data_collection_permissions" warning is advisory — accept it.
+- The 12 `UNSAFE_VAR_ASSIGNMENT` (innerHTML) warnings are expected; every
+  dynamic value goes through `esc()`. The reviewer note is in
+  `docs/STORE_LISTING.md`. Keep new HTML-building code on `esc()` too.
+- "Do you need to submit source code?" → **No** (no bundler/minifier).
+- AMO rejects re-uploading an existing version number; a version uploaded by
+  hand in the Developer Hub can't also be submitted by CI.
