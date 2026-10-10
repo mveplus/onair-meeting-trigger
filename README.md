@@ -3,7 +3,7 @@
 ![ON-AIR Meeting Trigger](resources/OnAir_Meeting_Trigger_Extension_media.png)
 
 Detect Google Meet, Microsoft Teams, and Zoom meetings and trigger
-local or LAN automations (Home Assistant, Tasmota, LED signs).
+local or LAN automations (ON-AIR sign, Home Assistant, Tasmota, Shelly, phone push).
 
 
 ## Quick start
@@ -19,16 +19,17 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 ## Features
 - Meeting detection (Meet / Teams / Zoom)
 - Custom service detection (user-defined URL prefixes)
-- HTTP hooks (Home Assistant, Tasmota, Shelly, ESP)
+- Webhooks for anything with an HTTP API, with one-click templates for Tasmota, Shelly, Home Assistant and Ntfy push
 - **Phone push notifications** via [Ntfy](https://ntfy.sh) or any webhook — get pinged when a meeting starts/ends, no smart-home hardware required
-- **IoT (local + cloud)** target type — tries the device's local HTTP API first and transparently falls back to **your own** AWS IoT MQTT publish (via your own API Gateway + Lambda) when off-LAN. Bring-your-own-cloud, no third-party in the loop.
+- **ON-AIR sign** target (local + cloud, solid or breathing) — tries the sign's local HTTP API first and transparently falls back to **your own** AWS IoT MQTT publish (via your own API Gateway + Lambda) when off-LAN. Bring-your-own-cloud, no third-party in the loop.
 - **Per-target reconcile modes** (fire-once / verify / re-assert) — keeps your sign in sync and self-heals a missed command, without duplicate notifications
-- Toolbar popup with at-a-glance ON-AIR status and one-click **Pause** (1 hour / until you resume)
-- Redesigned settings UI with an unsaved-changes save bar
-- One-click targets for the ON-AIR sign (local first, AWS fallback — solid or breathing), webhook and listener, plus templates for Tasmota, Shelly, Home Assistant and ntfy
+- Toolbar popup with at-a-glance ON-AIR status, a "did it work?" health line and one-click **Pause** (1 hour / until you resume)
+- Settings that stay out of the way: collapsible cards, instant save for preferences, a save bar for target edits, per-target Test buttons with inline results
 - Import/export settings (includes trigger mode, timeout, toolbar icon mode) — credentials are excluded from exports
 - Flatpak / Snap compatible
 - Privacy-first (no telemetry; tokens are stored in `chrome.storage.local` and never synced to your Google account; only the meeting site origin is shared by default — the full meeting URL/ID is sent only when you opt in)
+
+![ON-AIR Meeting Trigger popup — off air, on air, paused](resources/Screenshot_OnAir_popup.png)
 
 ![ON-AIR Meeting Trigger Settings](resources/Screenshot_OnAir_dark_theme.png)
 
@@ -36,7 +37,9 @@ local or LAN automations (Home Assistant, Tasmota, LED signs).
 
 Releases are automated via GitHub Actions.
 
-To publish a new version:
+To publish a new version, first move the **Unreleased** notes in
+[CHANGELOG.md](CHANGELOG.md) under a new `## [X.Y.Z] — YYYY-MM-DD` heading
+(and update the compare links), commit, then:
 ```bash
 ./scripts/release.sh X.Y.Z
 ```
@@ -47,6 +50,11 @@ This will:
 - create a git tag (vX.Y.Z)
 - push to GitHub
 - trigger an automated GitHub Release with a ZIP artifact
+- upload that ZIP to the Chrome Web Store as a **draft** — submit it for
+  review by hand in the developer console
+
+Store screenshots: `scripts/make-store-shots.sh` (see
+[docs/STORE_LISTING.md](docs/STORE_LISTING.md)).
 
 
 ## Credits

@@ -90,7 +90,6 @@ function extendUntil(pause) {
 function btn(text, onClick) {
   const b = document.createElement("button");
   b.textContent = text;
-  b.className = "small";
   b.addEventListener("click", onClick);
   return b;
 }
@@ -168,6 +167,7 @@ async function showBuildBadge() {
     if (!text) return;
     const el = $("build_badge");
     el.textContent = text;
+    el.title = text;
     el.style.display = "block";
   } catch { /* packed build — nothing to show */ }
 }
@@ -189,7 +189,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 $("openOptions").addEventListener("click", () => chrome.runtime.openOptionsPage());
-$("openOptions").addEventListener("keydown", e => { if (e.key === "Enter") chrome.runtime.openOptionsPage(); });
 
 // U2: paint from cache synchronously, then reconcile with live state.
 const cached = readCache();

@@ -38,7 +38,7 @@ You are solely responsible for:
   in your own AWS account. You own that infrastructure, its cost,
   and its security. The maintainer of the Extension has no access
   to it.
-- Backing up your configuration via **Export Settings** before
+- Backing up your configuration via **Export settings** before
   reflashing, reinstalling, or switching browsers.
 - Complying with the rules of any meeting service you use the
   Extension to detect, and with the acceptable-use policies of any
