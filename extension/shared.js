@@ -331,9 +331,14 @@ export function bodyEncodingFor(bodyTpl) {
 
 // ---- service matching --------------------------------------------------
 
+// A prefix typed without a scheme ("webex.com/meet/") would never match a
+// tab URL, so assume https:// rather than silently ignoring it.
 export function normalizePrefixes(prefixes) {
   if (!Array.isArray(prefixes)) return [];
-  return prefixes.map(p => String(p || "").trim()).filter(Boolean);
+  return prefixes
+    .map(p => String(p || "").trim())
+    .filter(Boolean)
+    .map(p => /^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? p : `https://${p}`);
 }
 
 export function getServiceMatchers(cfg) {
@@ -433,6 +438,30 @@ export function normalizeCustomServices(customServices, newId = defaultNewId) {
       return { id: s?.id || newId("svc"), name, enabled: s?.enabled !== false, prefixes };
     })
     .filter(Boolean);
+}
+
+// Collapsed custom-service card: title, host summary and what's missing.
+// Services with warnings are dropped on save (normalizeCustomServices).
+export function describeCustomService(s) {
+  const name = String(s?.name || "").trim();
+  const prefixes = normalizePrefixes(s?.prefixes || []);
+  const hosts = [];
+  const invalid = [];
+  for (const p of prefixes) {
+    const parsed = parsePrefix(p);
+    if (!parsed) { invalid.push(p); continue; }
+    const host = new URL(p).host;
+    if (!hosts.includes(host)) hosts.push(host);
+  }
+  const warnings = [];
+  if (!name) warnings.push("Needs a name");
+  if (!prefixes.length) warnings.push("Add a meeting URL");
+  for (const p of invalid) warnings.push(`Not a valid URL: ${p}`);
+  return {
+    title: name || "New service",
+    host: hosts.length ? hosts[0] + (hosts.length > 1 ? ` +${hosts.length - 1}` : "") : "no URL yet",
+    warnings
+  };
 }
 
 function defaultNewId(prefix = "t") {

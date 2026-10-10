@@ -87,7 +87,9 @@ docs/, resources/  Documentation and store assets
   `editsSignature()` (targets + customServices through `settingsSignature`)
   compares the form to the saved baseline, and the bar names hosts Chrome will
   prompt for (`missingOrigins`). Target cards are collapsed summaries (`name` ·
-  host · status) expanded via the `expanded` id set. Card order: Meeting detection
+  host · status) expanded via the `expanded` id set. Custom services reuse the same
+  card (`describeCustomService` drives the summary; incomplete ones are flagged
+  because they're dropped on save). Card order: Meeting detection
   (incl. custom services) → Targets → Preferences → Diagnostics → Backup &
   restore. Page messages and Undo use the bottom `#toast` (`showStatus`).
 - **Dev build badge:** `scripts/gen-build-info.sh` writes the gitignored

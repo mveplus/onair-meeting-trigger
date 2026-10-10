@@ -59,6 +59,8 @@ import {
   importDestinations,
   targetDisplayName,
   targetHost,
+  describeCustomService,
+  normalizePrefixes,
   describeTestResult,
   summarizeDispatch,
   describeDispatchHealth,
@@ -993,5 +995,29 @@ describe("U13: permissions still to be granted", () => {
       missingOrigins(["http://a/x", "https://b/y", "http://a/z"], ["http://a/*"]),
       ["https://b/*"]
     );
+  });
+});
+
+describe("custom services", () => {
+  test("normalizePrefixes assumes https:// when the scheme is missing", () => {
+    assert.deepEqual(
+      normalizePrefixes([" webex.com/meet/ ", "", "http://lan.local/call", "https://a.example/"]),
+      ["https://webex.com/meet/", "http://lan.local/call", "https://a.example/"]
+    );
+  });
+
+  test("describeCustomService summarizes a complete service", () => {
+    const d = describeCustomService({ name: "Webex", prefixes: ["https://webex.com/meet/", "https://webex.com/join/", "https://x.webex.com/"] });
+    assert.equal(d.title, "Webex");
+    assert.equal(d.host, "webex.com +1");
+    assert.deepEqual(d.warnings, []);
+  });
+
+  test("describeCustomService lists what's missing", () => {
+    const d = describeCustomService({ name: " ", prefixes: ["", "https://exa mple.com/"] });
+    assert.equal(d.title, "New service");
+    assert.equal(d.host, "no URL yet");
+    assert.deepEqual(d.warnings, ["Needs a name", "Not a valid URL: https://exa mple.com/"]);
+    assert.deepEqual(describeCustomService({ name: "X", prefixes: [] }).warnings, ["Add a meeting URL"]);
   });
 });
