@@ -13,6 +13,9 @@ import { fileURLToPath } from "node:url";
 export const GECKO_ID = "onair-meeting-trigger@mveplus";
 // Built-in data-collection consent (required for new AMO add-ons) needs 140+.
 export const MIN_FIREFOX = "140.0";
+// Firefox for Android added data_collection_permissions in 142; without its
+// own minimum, gecko's 140 applies there too and AMO's validator warns.
+export const MIN_FIREFOX_ANDROID = "142.0";
 
 export function toFirefoxManifest(chrome) {
   const m = structuredClone(chrome);
@@ -36,7 +39,8 @@ export function toFirefoxManifest(chrome) {
       // Requests go only to endpoints the user configures; nothing is sent
       // to the developer or anyone else (see docs/PRIVACY.md).
       data_collection_permissions: { required: ["none"] }
-    }
+    },
+    gecko_android: { strict_min_version: MIN_FIREFOX_ANDROID }
   };
   return m;
 }

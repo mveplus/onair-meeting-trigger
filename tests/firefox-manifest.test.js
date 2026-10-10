@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { toFirefoxManifest, GECKO_ID, MIN_FIREFOX } from "../scripts/firefox-manifest.mjs";
+import { toFirefoxManifest, GECKO_ID, MIN_FIREFOX, MIN_FIREFOX_ANDROID } from "../scripts/firefox-manifest.mjs";
 
 const chrome = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8"));
 
@@ -30,4 +30,10 @@ test("everything else is carried over unchanged, and the input isn't mutated", (
   for (const k of ["version", "name", "permissions", "optional_host_permissions", "devtools_page", "action", "icons"]) {
     assert.deepEqual(ff[k], chrome[k], k);
   }
+});
+
+test("Firefox for Android gets its own minimum (data consent needs 142 there)", () => {
+  const out = toFirefoxManifest({ manifest_version: 3, name: "x", version: "1.0.0" });
+  assert.equal(out.browser_specific_settings.gecko_android.strict_min_version, MIN_FIREFOX_ANDROID);
+  assert.equal(MIN_FIREFOX_ANDROID, "142.0");
 });
