@@ -1,30 +1,44 @@
 # Templates Guide
 
-Templates are preset **targets** that fill common ON/OFF URLs, methods, headers,
-and (for the AWS IoT bridge) mode settings for you. Most are HTTP Hooks; the
-local-first hybrid template is an `iotHybrid` target.
+Targets are added from the row of buttons in Settings → Targets:
 
-## Using templates in the UI
+| Button | Adds |
+|---|---|
+| **ON-AIR sign** | The companion sign — local first, AWS IoT cloud fallback (`iotHybrid`) |
+| **Webhook** | A blank HTTP hook — any URL, method, headers and body (`httpHook`) |
+| **Listener** | A local app that receives `state`/`service`/`url`/`ts` (`listener`) |
 
-1. Open Settings → Targets.
-2. Pick an entry from the **Add a target…** dropdown — either a **Blank**
-   HTTP Hook / Listener, or one of the **From template** presets.
-3. Click **Add**.
-4. Adjust URLs, headers, or body as needed.
+The same row continues with one-click **templates** — pre-filled
+Webhooks for common devices and services (hover a button for details):
 
-## Current templates
+| Button | What it sets up |
+|---|---|
+| **Tasmota** | Tasmota plug/relay — GET `/cm?cmnd=Power%20On` / `Power%20Off` |
+| **Shelly** | Shelly plug/relay — GET `/relay/0?turn=on` / `off` (Gen1, and Gen2+ via its compatibility endpoint) |
+| **Home Assistant** | POST to `/api/webhook/<id>` — no token needed; your automation decides what to switch |
+| **Ntfy push** | ntfy.sh push to your phone on ON and OFF |
 
-- Tasmota (GET)
-- Shelly (GET)
-- On-Air API (placeholder token)
-- ntfy.sh (placeholder topic)
-- Home Assistant Webhook
-- Generic JSON (POST)
-- OnAir IoT — local first, AWS fallback
+Template URLs mark what you must fill in as `YOUR_*` (`YOUR_DEVICE_IP`,
+`YOUR_TOPIC`, `YOUR_HA_HOST`, `YOUR_ON_WEBHOOK_ID`…). Until every one is
+replaced, the card shows **⚠ Replace YOUR_…** instead of **Ready**, and the
+extension won't ask Chrome for access to a placeholder host.
 
-### OnAir IoT — local first, AWS fallback
+### Removed templates
 
-`OnAir IoT — local first, AWS fallback` is a **single-row** target
+Saved targets don't depend on the template they came from, so these keep
+working if you already have them (except LED, see below):
+
+- *OnAir IoT — local first, AWS fallback* → it's the **ON-AIR sign** button.
+- *On-Air API* → use **ON-AIR sign** with the cloud fields blank (LAN-only).
+- *LED* (old `/led/on` firmware) → the LED target type has been removed;
+  saved LED targets are dropped. Use **ON-AIR sign**.
+- *Generic JSON (POST)* → use **Webhook**, set Method to POST and put JSON in
+  the body. A body starting with `{` or `[` is sent as `application/json`
+  automatically unless you set your own `Content-Type` header.
+
+## ON-AIR sign — local first, AWS fallback
+
+The **ON-AIR sign** button adds a **single-row** target
 (type `iotHybrid`, not `httpHook`) that does what two parallel hooks
 can't: try the device's local HTTP API first, fall back to the AWS IoT
 cloud bridge only if local is unreachable inside a per-row timeout.
@@ -45,12 +59,12 @@ The cloud half pairs with the companion Lambda + API Gateway in the
 [`onair-led-sign-firmware`](https://github.com/mveplus/onair-led-sign-firmware)
 repo under `scripts/cloud-bridge/`. After deploying that you get an
 API Gateway endpoint and a bearer token. The Lambda reads `thing` and
-`mode` from the URL query string, so this template needs no body
+`mode` from the URL query string, so this target needs no body
 templating.
 
-#### One template, choose Solid or Breathing
+### Solid or Breathing
 
-Rather than shipping a separate "Breathing" template, the **ON mode**
+Rather than a separate "Breathing" target, the **ON mode**
 dropdown picks what the "ON" action does; **OFF mode** stays `0` so the
 meeting-ended flow returns the sign to dark either way:
 
@@ -60,18 +74,17 @@ meeting-ended flow returns the sign to dark either way:
 | `2` (breathing) | soft pulse for the meeting | You prefer a softer pulsing pattern during meetings. |
 
 Want one sign solid and another pulsing for the same event? Add the
-template twice and set a different **ON mode** (and `thing`) on each row.
+sign twice and set a different **ON mode** (and `thing`) on each row.
 
-The template seeds **empty** string fields so a fresh Export Settings
-file never carries `REPLACE_WITH_*` placeholders by accident — fill
-in the row's UI and Save, then Export gives you real values.
+The sign starts with **empty** fields (grey example hints only), so a
+fresh Export Settings file never carries placeholders by accident.
 
 Fields:
 
 | Field | What to put | Source |
 |---|---|---|
 | Local base URL | IP of the device on your LAN | `http://10.37.22.98` — recommend a DHCP reservation so it doesn't drift |
-| Local API token | The device's `X-API-Token` value | Same one you'd use in the On-Air API template |
+| Local API token | The device's `X-API-Token` value | Shown in the device's web UI |
 | Cloud endpoint URL | API Gateway HTTP API endpoint | `aws apigatewayv2 get-apis ... --output text` from the firmware repo |
 | Cloud bearer token | The shared bearer | Contents of `.onair-bridge-token` from the firmware repo's `scripts/cloud-bridge/deploy.sh` run |
 | AWS IoT thing | The Thing name | Must be in the Lambda's `ALLOWED_THINGS` env var |
@@ -79,24 +92,10 @@ Fields:
 | OFF mode | `0` off (typical) | `0` |
 | Local timeout (ms) | How long to wait before fallover | `1500` is a sensible default |
 
-## Template placeholders
-
-Templates include placeholders that you should replace:
-
-- `REPLACE_WITH_TOKEN` → your On-Air API token
-- `YOUR_TOPIC` → your ntfy.sh topic
-- `http://device.local` → your device hostname or IP
-
-The **OnAir IoT** local-first hybrid template seeds
-empty fields instead of literal placeholders — the inputs show grey
-hint text (e.g. `https://API_ID.execute-api.eu-west-1.amazonaws.com`,
-`onair-test-1`) so nothing leaks into an Export Settings file until you
-type real values.
-
 ## Heads-up: `*.local` (mDNS) in MV3 service workers
 
-The local **On-Air API** template defaults to `http://device.local/...`,
-which **resolves fine from the shell** (`curl`, `getent`) but generally
+A `*.local` address (e.g. `http://onair.local` or
+`homeassistant.local`) **resolves fine from the shell** (`curl`, `getent`) but generally
 **does not work from inside the extension's service worker** on
 Linux — Chromium's network-service resolver doesn't fall through to
 mDNS / Avahi the way `glibc`'s NSS does. Toggling
@@ -113,7 +112,7 @@ OFF URL: http://10.37.22.98/api/set?state=0
 ```
 
 Or, if you don't want to depend on the LAN path at all, use the
-**OnAir IoT** template above configured cloud-only (leave the local
+**ON-AIR sign** above configured cloud-only (leave the local
 fields blank) — it goes over HTTPS to an AWS API Gateway and has no
 name-resolution dependency.
 
@@ -141,27 +140,19 @@ crafted meeting link can't inject extra parameters or JSON fields:
 
 ## Adding your own templates (developers)
 
-Templates are defined in:
-
-- `extension/options.js` → `TEMPLATES` object
-
-Each template looks like:
+Templates are defined in `extension/options.js` → `TEMPLATES`; the
+template buttons on the Add row are built from it. Mark anything the user must fill in
+as `YOUR_*` so the card flags it:
 
 ```js
 my_template: {
-  label: "My Template",
+  label: "My device",          // button text — keep it short
+  name: "My device",           // the new target's name
+  hint: "What it sets up",     // button tooltip
   target: {
-    type: "httpHook",
-    onUrl: "https://example/on",
-    offUrl: "https://example/off",
-    method: "POST",
-    headers: [{ key: "Content-Type", value: "application/json" }],
-    body: "{\"state\":\"{state}\"}",
-    basicAuth: null,
-    checkStatus: true,
-    statusCodes: [200, 202, 204],
-    matchOn: "",
-    matchOff: ""
+    ...hookDefaults(),         // GET, no headers/body/auth, status check on
+    onUrl: "http://YOUR_DEVICE_IP/on",
+    offUrl: "http://YOUR_DEVICE_IP/off"
   }
 }
 ```
