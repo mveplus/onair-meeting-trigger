@@ -1,4 +1,4 @@
-# ON-AIR Meeting Trigger (Chromium Extension)
+# ON-AIR Meeting Trigger (Chrome / Chromium / Firefox extension)
 
 Detects when a **Google Meet**, **Microsoft Teams**, **Zoom** or **custom**
 meeting tab is open (or active) and switches your outputs — an ON-AIR sign, a
@@ -41,7 +41,7 @@ Settings are grouped top to bottom:
 1. **Meeting detection** — Meet / Teams / Zoom, your custom services and
    *Trigger when*. Saved instantly.
 2. **Targets** — what to switch. Target edits are saved with the **Save now**
-   bar that appears when something changed (it also names any site Chrome will
+   bar that appears when something changed (it also names any site the browser will
    ask you to allow).
 3. **Preferences** — toolbar icon (always colour, or colour = ON / grey = OFF),
    privacy (full meeting URL on/off) and the request timeout. Saved instantly.
@@ -162,7 +162,7 @@ on **Enable debug logging** (Settings → Diagnostics) to keep a rolling log of
 state changes, heartbeat checks and worker restarts, with per-target outcome,
 HTTP status, latency and error text.
 
-Open it via **Open diagnostics…** or the **ON-AIR** panel in Chrome DevTools.
+Open it via **Open diagnostics…** or the **ON-AIR** panel in the browser's DevTools (F12).
 **Copy report** bundles the log with your redacted settings for a bug report.
 
 ---
@@ -181,7 +181,7 @@ the imported targets talk to before adding them.
 
 - No telemetry. Requests go only to the endpoints you configure.
 - Tokens, passwords and secret-looking headers/URLs (e.g. webhook URLs) live
-  in `chrome.storage.local` and never sync to your Google account.
+  in local extension storage and never sync to your Google / Firefox account.
 - `{url}` sends only the meeting site by default — never the meeting ID unless
   you opt in.
 - A token sent over plain `http://` to a non-LAN host shows a warning.
@@ -200,11 +200,27 @@ save a target that uses them, and released when no target needs it anymore.
 
 ## Installation
 
+### Chrome / Chromium / Edge
+
 From the [Chrome Web Store](https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn?utm_source=item-share-cb),
 or unpacked:
 
 1. Open `chrome://extensions` and enable **Developer mode**.
 2. **Load unpacked** → select this `extension/` folder.
+
+### Firefox (140 or newer)
+
+From Firefox Add-ons (addons.mozilla.org — listing coming soon), or for
+development:
+
+1. Run `scripts/build-zip.sh` — it builds `dist-firefox.zip` with the
+   Firefox manifest (the `extension/` folder itself is the Chrome version).
+2. Open `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…**
+   → pick `dist-firefox.zip`. (Temporary add-ons are removed when Firefox
+   restarts.)
+
+Firefox asks for access to your endpoints the same way Chrome does, when you
+save a target or press Test.
 
 ### Ungoogled Chromium (Flatpak)
 
@@ -230,7 +246,7 @@ with the Chrome Web Store build.
 
 ```bash
 npm test                  # unit tests for shared.js (Node's built-in runner)
-scripts/build-zip.sh      # dist.zip of this folder
+scripts/build-zip.sh      # dist.zip (Chrome) + dist-firefox.zip (Firefox)
 ```
 
 Releases: see the [repository README](../README.md#releasing). Version history:

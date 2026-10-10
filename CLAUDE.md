@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-**ON-AIR Meeting Trigger** is a Chromium MV3 browser extension. It detects Meet/Zoom/Teams/custom
+**ON-AIR Meeting Trigger** is an MV3 browser extension for Chrome/Chromium and Firefox (140+). It detects Meet/Zoom/Teams/custom
 meeting tabs and triggers a local/remote http/s service and/or an ON-AIR LED sign on the LAN (and
 beyond). Pairs with the `onair-led-sign-firmware` project.
 
@@ -20,7 +20,8 @@ extension/         The MV3 extension (this is what ships)
   icons/
 tests/             Node built-in test runner specs for shared.js (`npm test`)
 package.json       `type:module`; `npm test` → `node --test`
-scripts/           Release tooling (build-zip.sh, release.sh, gen-build-info.sh)
+scripts/           Release tooling (build-zip.sh, release.sh, gen-build-info.sh,
+                   cws-upload.sh, amo-submit.sh, firefox-manifest.mjs)
                    + make-store-shots.sh (Chrome Web Store tiles)
 .github/workflows/release.yml   Tag-triggered release + Chrome Web Store upload
 VERSION            Mirror of manifest version, bumped by release.sh
@@ -37,6 +38,15 @@ docs/, resources/  Documentation and store assets
   the live dispatch and the options "Test" buttons in agreement, and what the
   tests exercise. Keep `shared.js` free of `chrome.*`, `window`, `document`, and
   `fetch` at import time.
+- **Firefox build:** `extension/` is the Chrome package. `scripts/firefox-manifest.mjs`
+  (`toFirefoxManifest`, tested) derives the Firefox manifest at build time:
+  `background.scripts` instead of `service_worker` (Firefox MV3 has no
+  extension service workers — it runs background.js as a module event page),
+  `options_ui` instead of `options_page`, and `browser_specific_settings.gecko`
+  (id `onair-meeting-trigger@mveplus`, min 140, `data_collection_permissions:
+  none`). `build-zip.sh` writes `dist.zip` + `dist-firefox.zip`. Keep code
+  browser-neutral (`chrome.*` works in both); `permissions.request` must stay
+  the first `await` of a click (Firefox enforces the user gesture strictly).
 - **Credentials never sync.** Tokens (`localToken`, `cloudToken`,
   `basicAuth.pass`, `Authorization`/`X-API-Token` headers) live in
   `chrome.storage.local` via `extractSecrets`/`applySecrets`; only the sanitized
@@ -208,6 +218,12 @@ the secret, then use the manual upload workflow):
 - `CWS_REFRESH_TOKEN` — long-lived refresh token captured once
 - `CWS_PUBLISHER_ID` — publisher id from the developer console (needed by the v2 API)
 - `CWS_EXTENSION_ID` — the 32-char id from the CWS URL
+- `AMO_JWT_ISSUER`, `AMO_JWT_SECRET` — addons.mozilla.org API key/secret for
+  step 6 (**Submit to Firefox Add-ons**, `scripts/amo-submit.sh` → `web-ext
+  sign --channel listed`). Missing → the step skips with a warning; a failed
+  submission is `continue-on-error`. Re-submit with **Actions → Upload to
+  Firefox Add-ons** (`amo-upload.yml`). The first AMO version is uploaded by
+  hand (see `docs/STORE_LISTING.md`).
 
 ### Notes / gotchas
 

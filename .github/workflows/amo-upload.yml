@@ -1,0 +1,47 @@
+name: Upload to Firefox Add-ons
+
+# Manual (re-)submission of a release's Firefox package to
+# addons.mozilla.org — e.g. after adding the AMO secrets, or when the release
+# run's submission failed (Actions → Upload to Firefox Add-ons → Run workflow).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to submit, e.g. v0.9.0 (blank = latest release)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5.0.0
+
+      - name: Download dist-firefox.zip from the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAG" ]; then
+            TAG="$(gh release view -R "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+          fi
+          echo "Submitting the dist-firefox.zip from release $TAG"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p dist-firefox.zip
+
+      - name: Submit to Firefox Add-ons
+        id: amo
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: scripts/amo-submit.sh dist-firefox.zip
+
+      - name: Fail if the secrets are missing
+        if: steps.amo.outputs.result == 'skipped'
+        run: |
+          echo "::error::Add the AMO_JWT_ISSUER / AMO_JWT_SECRET secrets, then run this again."
+          exit 1

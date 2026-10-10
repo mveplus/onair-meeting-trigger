@@ -37,7 +37,7 @@ jobs:
           print(f"OK: manifest.json version = {ver}")
           PY
 
-      - name: Build extension zip
+      - name: Build extension zips (Chrome + Firefox)
         run: |
           chmod +x scripts/build-zip.sh
           scripts/build-zip.sh
@@ -61,7 +61,9 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3.0.0
         with:
-          files: dist.zip
+          files: |
+            dist.zip
+            dist-firefox.zip
           generate_release_notes: true
 
       - name: Upload to Chrome Web Store (draft)
@@ -86,3 +88,18 @@ jobs:
           PUBLISHER_ID:  ${{ secrets.CWS_PUBLISHER_ID }}
           EXTENSION_ID:  ${{ secrets.CWS_EXTENSION_ID }}
         run: scripts/cws-upload.sh dist.zip
+
+      - name: Submit to Firefox Add-ons
+        # Submits dist-firefox.zip to addons.mozilla.org (listed). AMO
+        # reviews it by itself — no draft step. Skips with a warning while
+        # the AMO_JWT_* secrets aren't set; a failed submission doesn't fail
+        # the release — retry with the "Upload to Firefox Add-ons" workflow
+        # (amo-upload.yml).
+        #
+        # Secrets: AMO_JWT_ISSUER, AMO_JWT_SECRET (addons.mozilla.org →
+        # Tools → Manage API Keys).
+        continue-on-error: true
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: scripts/amo-submit.sh dist-firefox.zip

@@ -40,3 +40,37 @@ popup changes.
 - `OnAir_marquee_promo_tile_1400_560.png` — marquee promo tile
 - `OnAir_Meeting_Trigger_Extension_media.png` — banner (also the README header)
 - `icons_combined.png` — icon artwork source
+
+---
+
+# Firefox Add-ons (addons.mozilla.org)
+
+The Firefox package is `dist-firefox.zip` (built by `scripts/build-zip.sh`,
+attached to every GitHub release). Its manifest is generated from
+`extension/manifest.json` by `scripts/firefox-manifest.mjs`: add-on ID
+`onair-meeting-trigger@mveplus`, Firefox 140+.
+
+**First submission (one time, by hand):** Developer Hub → *Submit a New
+Add-on* → *On this site* → upload `dist-firefox.zip`. Source code upload is
+not needed — the code isn't minified or bundled.
+
+- **Name:** ON-AIR Meeting Trigger
+- **Summary** (≤ 250 chars): Turns your ON-AIR sign, smart plug, Home
+  Assistant or phone notification on when a Google Meet, Teams, Zoom or custom
+  meeting tab is open — and off when it closes. Local-first, no telemetry.
+- **Categories:** e.g. *Alerts & Updates*, *Social & Communication*.
+- **License:** MIT.
+- **Data collection:** none — the manifest declares
+  `data_collection_permissions: { required: ["none"] }`. Requests go only to
+  endpoints the user configures; nothing reaches the developer.
+- **Privacy policy:** contents of `docs/PRIVACY.md`.
+- **Screenshots:** the same tiles as the Chrome Web Store, `resources/store/`.
+- **Notes to reviewer:** host access is optional and requested per configured
+  endpoint (on Save / Test). The `innerHTML` linter warnings are template
+  strings whose dynamic values all pass through the `esc()` HTML-escaper in
+  `options.js` / `diagnostics.js`.
+
+**Later versions** go through CI: add the repository secrets
+`AMO_JWT_ISSUER` and `AMO_JWT_SECRET` (Developer Hub → Tools → *Manage API
+Keys*). Each release tag then submits `dist-firefox.zip` automatically;
+**Actions → Upload to Firefox Add-ons** re-submits a release by hand.
