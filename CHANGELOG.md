@@ -14,11 +14,12 @@ auto-generated notes and the built `dist.zip`.
   skipped with a warning instead of failing the release, and a new
   **Upload to Chrome Web Store** workflow (Actions → Run workflow) uploads
   a release later. Needs the new `CWS_PUBLISHER_ID` secret.
-
 - `scripts/release.sh`: checks before changing anything (on `main`, in sync
   with origin, tag unused locally and remotely, newer version, CHANGELOG
   section, tests), `--dry-run`, annotated tags that work with signed-tag
   setups, resumes after a failed tag/push, pushes only the new tag.
+- `scripts/release.sh` moves the [Unreleased] notes to the new version
+  itself (with compare links) as part of the release commit.
 
 ## [0.8.0] — 2026-10-10
 
