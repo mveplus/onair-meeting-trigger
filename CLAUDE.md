@@ -170,8 +170,18 @@ On any pushed `v*` tag the `release` job:
    the same tag can recreate it cleanly (the tag itself is left intact).
 4. **Create GitHub release** — `softprops/action-gh-release` attaches `dist.zip` and auto-generates
    release notes.
-5. **Upload to Chrome Web Store (draft)** — pushes `dist.zip` as a *draft* version via the CWS API.
-   It does **not** publish.
+5. **Upload to Chrome Web Store (draft)** — `scripts/cws-upload.sh` (CWS API **v2**; v1.1 is shut
+   down on 2026-10-15) checks the item's status first. If the previous version is still
+   `PENDING_REVIEW` or `STAGED` (approved, not yet published) the store refuses uploads, so the
+   step **skips with a warning** — the release stays green — and the run summary says what to do.
+   Otherwise it uploads `dist.zip` as a *draft* and waits for processing. It does **not** publish.
+
+### Upload later (manual button)
+
+`.github/workflows/cws-upload.yml` — **Actions → Upload to Chrome Web Store → Run workflow**,
+optional `tag` input (blank = latest release). It uploads that release's own `dist.zip` with the
+same script and fails if the store is still blocked. Use it after a skipped upload once the
+previous review is done (or cancelled in the dev console).
 
 ### Finish in the Chrome Web Store
 
@@ -182,10 +192,12 @@ anything reaches Google's review queue.
 ### Required GitHub secrets
 
 The CWS step needs these repo secrets (Settings → Secrets and variables → Actions). If any are
-missing or stale, the run hard-fails at step 5 *after* the GitHub release is already created:
+missing or stale, the run fails at step 5 *after* the GitHub release is already created (fix
+the secret, then use the manual upload workflow):
 
 - `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET` — OAuth desktop client
 - `CWS_REFRESH_TOKEN` — long-lived refresh token captured once
+- `CWS_PUBLISHER_ID` — publisher id from the developer console (needed by the v2 API)
 - `CWS_EXTENSION_ID` — the 32-char id from the CWS URL
 
 ### Notes / gotchas

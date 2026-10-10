@@ -51,7 +51,9 @@ This will:
 - push to GitHub
 - trigger an automated GitHub Release with a ZIP artifact
 - upload that ZIP to the Chrome Web Store as a **draft** — submit it for
-  review by hand in the developer console
+  review by hand in the developer console. If the previous version is still
+  in review, the upload is skipped with a warning; run
+  **Actions → Upload to Chrome Web Store** once it's through
 
 Store screenshots: `scripts/make-store-shots.sh` (see
 [docs/STORE_LISTING.md](docs/STORE_LISTING.md)).

@@ -1,0 +1,51 @@
+name: Upload to Chrome Web Store
+
+# Manual re-try of the release's Chrome Web Store upload — for when the
+# release run skipped it because the previous version was still in review
+# (Actions → Upload to Chrome Web Store → Run workflow). Uploads the exact
+# dist.zip attached to the GitHub release, as a draft.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to upload, e.g. v0.8.0 (blank = latest release)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5.0.0
+
+      - name: Download dist.zip from the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAG" ]; then
+            TAG="$(gh release view -R "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+          fi
+          echo "Uploading the dist.zip from release $TAG"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p dist.zip
+
+      - name: Upload to Chrome Web Store (draft)
+        id: cws
+        env:
+          CLIENT_ID:     ${{ secrets.CWS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          PUBLISHER_ID:  ${{ secrets.CWS_PUBLISHER_ID }}
+          EXTENSION_ID:  ${{ secrets.CWS_EXTENSION_ID }}
+        run: scripts/cws-upload.sh dist.zip
+
+      - name: Fail if the store is still not accepting uploads
+        if: steps.cws.outputs.result == 'blocked'
+        run: |
+          echo "::error::The previous version is still in review or not yet published — see the summary above, then run this again."
+          exit 1

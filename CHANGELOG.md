@@ -7,6 +7,16 @@ auto-generated notes and the built `dist.zip`.
 
 ## [Unreleased]
 
+### Changed
+- Release workflow: the Chrome Web Store upload moves to the store's v2 API
+  (v1.1 shuts down 2026-10-15) and checks the store first. If the previous
+  version is still in review or approved-but-unpublished, the upload is
+  skipped with a warning instead of failing the release, and a new
+  **Upload to Chrome Web Store** workflow (Actions → Run workflow) uploads
+  a release later. Needs the new `CWS_PUBLISHER_ID` secret.
+
+## [0.8.0] — 2026-10-10
+
 ### Added
 - Settings: target templates are one-click buttons on the **Add** row —
   **Tasmota**, **Shelly**, **Home Assistant**, **Ntfy push** — next to
@@ -161,7 +171,8 @@ auto-generated notes and the built `dist.zip`.
 ### Fixed
 - Dark-theme coverage; settings inputs containing quotes (0.1.9).
 
-[Unreleased]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.5.0...v0.5.1
