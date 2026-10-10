@@ -58,12 +58,50 @@ not needed — the code isn't minified or bundled.
 - **Summary** (≤ 250 chars): Turns your ON-AIR sign, smart plug, Home
   Assistant or phone notification on when a Google Meet, Teams, Zoom or custom
   meeting tab is open — and off when it closes. Local-first, no telemetry.
+- **Description** (AMO allows basic HTML — `<b>`, `<ul>`/`<li>`, `<a>`):
+
+  ```html
+  Lets the people around you know you're on a call. When a Google Meet, Microsoft Teams or Zoom meeting tab is open, ON-AIR Meeting Trigger switches your sign, light or automation on — and off again when the meeting tab closes.
+
+  <b>What it can trigger</b>
+  <ul>
+  <li>An ON-AIR LED/neon sign on your network, with optional cloud fallback when you're away from it</li>
+  <li>Smart plugs and lights: ready-made Tasmota and Shelly templates</li>
+  <li>Home Assistant webhooks</li>
+  <li>Phone notifications via Ntfy</li>
+  <li>Any HTTP/HTTPS endpoint (GET or POST, custom headers and JSON body)</li>
+  </ul>
+
+  <b>Features</b>
+  <ul>
+  <li>Detects Meet, Teams and Zoom out of the box; add your own meeting sites (e.g. Jitsi, Webex)</li>
+  <li>Any open meeting tab or only the active tab</li>
+  <li>Pause from the toolbar for an hour or until you resume</li>
+  <li>Keeps the sign in sync: a light check every minute fixes a sign that missed an update</li>
+  <li>Built-in Test buttons and an optional diagnostics log (also a DevTools panel)</li>
+  <li>Light and dark theme; export/import settings (works between Firefox and Chrome)</li>
+  </ul>
+
+  <b>Private by design</b>
+  <ul>
+  <li>No telemetry, no analytics, no developer servers — requests go only to the endpoints you set up</li>
+  <li>Sends the meeting site's origin only (no meeting ID) unless you turn on the full URL</li>
+  <li>Tokens and passwords stay on this device and are left out of exports</li>
+  <li>Asks for access to each address only when you save or test it</li>
+  </ul>
+
+  Open source (MIT): <a href="https://github.com/mveplus/onair-meeting-trigger">github.com/mveplus/onair-meeting-trigger</a>
+  Sign firmware: <a href="https://github.com/mveplus/onair-led-sign-firmware">github.com/mveplus/onair-led-sign-firmware</a>
+  ```
+- **Homepage:** https://github.com/mveplus/onair-meeting-trigger
+- **Support site:** https://github.com/mveplus/onair-meeting-trigger/issues
 - **Categories:** e.g. *Alerts & Updates*, *Social & Communication*.
 - **License:** MIT.
 - **Data collection:** none — the manifest declares
   `data_collection_permissions: { required: ["none"] }`. Requests go only to
   endpoints the user configures; nothing reaches the developer.
-- **Privacy policy:** contents of `docs/PRIVACY.md`.
+- **Privacy policy:** https://mveplus.github.io/onair-meeting-trigger/PRIVACY.html
+  (GitHub Pages copy of `docs/PRIVACY.md`).
 - **Screenshots:** the same tiles as the Chrome Web Store, `resources/store/`.
 - **Notes to reviewer:** host access is optional and requested per configured
   endpoint (on Save / Test). The `innerHTML` linter warnings are template
