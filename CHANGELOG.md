@@ -19,6 +19,10 @@ auto-generated notes and the built `dist.zip`.
 ### Fixed
 - Closing a meeting tab or window turns the sign off right away in Firefox
   (it still listed the closing tab, so OFF waited for the 1-minute heartbeat).
+- Two browsers (or computers) sharing one sign no longer fight over it: the
+  one without a meeting used to switch the sign off on every 1-minute
+  heartbeat. While idle, the heartbeat now only retries an OFF of its own
+  that didn't reach the sign.
 
 ## [0.8.1] — 2026-10-10
 

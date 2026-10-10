@@ -71,7 +71,11 @@ docs/, resources/  Documentation and store assets
   `/api/status` on the LAN (`readIotLocalMode` + `parseDeviceMode`) and falls
   back to the cloud bridge's shadow read (`readIotCloudMode` → `GET ?thing=…` →
   `parseCloudStateMode`) when off-network; drift via `reconcileDrift`.
-  `reconcilePass()` runs only on `reason === "alarm"`.
+  `reconcilePass()` runs only on `reason === "alarm"`. While this browser
+  is OFF the heartbeat holds (`heartbeatShouldFire`): it only retries a
+  target whose own OFF failed (`trackOffFailures` → `offFailed` in
+  storage.session), so an idle browser can't switch off a sign another
+  browser's meeting turned on.
   (Cloud readback is served by the firmware Device Shadow + Lambda GET in the
   `onair-led-sign-firmware` repo.)
 - **Diagnostics:** an opt-in ring buffer (`activityLog` in `storage.local`, cap

@@ -50,6 +50,8 @@ import {
   redirectPolicyFor,
   isRelevantTabUpdate,
   withoutClosingTabs,
+  heartbeatShouldFire,
+  trackOffFailures,
   isSecretHeader,
   urlCarriesSecret,
   urlMatchesPrefix,
@@ -1066,5 +1068,72 @@ describe("withoutClosingTabs", () => {
     assert.equal(withoutClosingTabs(tabs, { tabs: new Set(), windows: new Set() }).length, 3);
     assert.equal(withoutClosingTabs(tabs, null).length, 3);
     assert.deepEqual(withoutClosingTabs(undefined, null), []);
+  });
+});
+
+describe("heartbeat while idle (two browsers, one sign)", () => {
+  test("ON is always kept up; OFF only retries a failed OFF", () => {
+    assert.equal(heartbeatShouldFire("ON", false), true);
+    assert.equal(heartbeatShouldFire("ON", undefined), true);
+    assert.equal(heartbeatShouldFire("OFF", undefined), false);
+    assert.equal(heartbeatShouldFire("OFF", false), false);
+    assert.equal(heartbeatShouldFire("OFF", true), true);
+  });
+
+  test("trackOffFailures records failed OFFs and clears on delivery or ON", () => {
+    const off = trackOffFailures({}, [
+      { id: "sign", ok: false },
+      { id: "hook", ok: true },
+      { id: "late", ok: false, superseded: true },
+      { id: "x", noop: true },
+    ], "OFF");
+    assert.deepEqual(off, { sign: true });
+    assert.deepEqual(trackOffFailures(off, [{ id: "sign", ok: true }], "OFF"), {});
+    assert.deepEqual(trackOffFailures(off, [{ id: "other", ok: true }], "OFF"), { sign: true });
+    assert.deepEqual(trackOffFailures(off, [{ id: "sign", ok: true }], "ON"), {});
+    assert.deepEqual(trackOffFailures(undefined, null, "OFF"), {});
+  });
+
+  // A tiny model of one sign driven by two browsers with verify reconcile:
+  // each heartbeat reads the sign and re-fires on drift, as background.js
+  // reconcileTarget does.
+  function heartbeat(browser, sign) {
+    if (!heartbeatShouldFire(browser.state, browser.offFailed[sign.id])) return;
+    const want = browser.state === "ON" ? 1 : 0;
+    if (reconcileDrift(want, sign.mode)) sign.mode = want;
+  }
+
+  test("the idle browser no longer switches off a meeting in the other browser", () => {
+    const sign = { id: "sign", mode: 0 };
+    const firefox = { state: "OFF", offFailed: {} };
+    const chromium = { state: "OFF", offFailed: {} };
+    // Firefox joins a meeting: its ON edge lights the sign.
+    firefox.state = "ON";
+    sign.mode = 1;
+    const seen = [];
+    for (let minute = 0; minute < 5; minute++) {
+      heartbeat(chromium, sign); // idle, no meeting there
+      seen.push(sign.mode);
+      heartbeat(firefox, sign);
+      seen.push(sign.mode);
+    }
+    assert.deepEqual(seen, Array(10).fill(1), "sign must stay ON the whole time");
+  });
+
+  test("a browser still retries its own OFF that didn't reach the sign", () => {
+    const sign = { id: "sign", mode: 1 };
+    const browser = { state: "OFF", offFailed: trackOffFailures({}, [{ id: "sign", ok: false }], "OFF") };
+    heartbeat(browser, sign);
+    assert.equal(sign.mode, 0);
+  });
+
+  test("when every meeting ends the sign goes and stays OFF", () => {
+    const sign = { id: "sign", mode: 1 };
+    const a = { state: "OFF", offFailed: {} };
+    const b = { state: "OFF", offFailed: {} };
+    sign.mode = 0; // last OFF edge landed
+    heartbeat(a, sign);
+    heartbeat(b, sign);
+    assert.equal(sign.mode, 0);
   });
 });

@@ -29,6 +29,8 @@ import {
   redirectPolicyFor,
   isRelevantTabUpdate,
   withoutClosingTabs,
+  heartbeatShouldFire,
+  trackOffFailures,
   serviceMatchPatterns,
   targetDisplayName,
   summarizeDispatch,
@@ -133,6 +135,28 @@ async function recordDispatch(results, to) {
   if (!rec.total) return;
   try {
     await stateStore().set({ [DISPATCH_KEY]: rec });
+  } catch {
+    // best effort
+  }
+}
+
+// Targets whose last OFF didn't land (see heartbeatShouldFire). Kept in
+// storage.session so it survives the worker/event page being unloaded.
+const OFF_FAILED_KEY = "offFailed";
+
+async function loadOffFailed() {
+  try {
+    const got = await stateStore().get({ [OFF_FAILED_KEY]: {} });
+    return got[OFF_FAILED_KEY] || {};
+  } catch {
+    return {};
+  }
+}
+
+async function recordOffFailures(results, state) {
+  try {
+    const next = trackOffFailures(await loadOffFailed(), results, state);
+    await stateStore().set({ [OFF_FAILED_KEY]: next });
   } catch {
     // best effort
   }
@@ -664,6 +688,7 @@ async function applySideEffects(next, cfg, reason = "") {
   const results = (await Promise.allSettled(jobs)).map(r => r.value).filter(Boolean);
   await iconJob;
   await recordDispatch(results, next.state);
+  await recordOffFailures(results, next.state);
   await logActivity({ kind: "edge", reason, to: next.state, service: next.service || "", targets: results });
 }
 
@@ -672,9 +697,14 @@ async function applySideEffects(next, cfg, reason = "") {
 // only on drift (iotHybrid via /api/status or the cloud shadow). Returns a
 // log-friendly record;
 // `noop:true` means nothing was sent.
-async function reconcileTarget(t, vars, timeoutSec, signal) {
+async function reconcileTarget(t, vars, timeoutSec, signal, offFailed = {}) {
   const mode = resolveReconcile(t);
   if (mode === "single") return { id: t.id, type: t.type, action: "skip", noop: true };
+  // No meeting here and our OFF landed: the sign may belong to another
+  // browser's meeting — don't switch it off under it.
+  if (!heartbeatShouldFire(vars.state, offFailed[t.id])) {
+    return { id: t.id, type: t.type, action: "hold", noop: true };
+  }
 
   if (mode === "always") {
     const r = await dispatchTarget(t, vars, timeoutSec, signal);
@@ -703,14 +733,16 @@ async function reconcilePass(cfg, cur) {
   const signal = edgeAbort.signal;
   const vars = makeVars(cur, cfg);
   const timeoutSec = clampTimeoutSec(cfg.timeoutSec, 3);
+  const offFailed = cur.state === "OFF" ? await loadOffFailed() : {};
   const jobs = [];
   for (const t of cfg.targets || []) {
     if (!t?.enabled) continue;
     if (resolveReconcile(t) === "single") continue;
-    jobs.push(reconcileTarget(t, vars, timeoutSec, signal));
+    jobs.push(reconcileTarget(t, vars, timeoutSec, signal, offFailed));
   }
   if (!jobs.length) return;
   const results = (await Promise.allSettled(jobs)).map(r => r.value).filter(Boolean);
+  if (cur.state === "OFF") await recordOffFailures(results, "OFF");
   // Only log when something actually fired, so the log stays a signal of
   // remediations rather than a per-minute heartbeat of no-ops.
   if (results.some(r => r && !r.noop)) {
