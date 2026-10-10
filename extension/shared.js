@@ -861,6 +861,15 @@ export function isRelevantTabUpdate(changeInfo) {
   return changeInfo?.url !== undefined || changeInfo?.status === "complete";
 }
 
+// Firefox still lists a tab (and a closing window's tabs) in tabs.query
+// while its onRemoved listeners run, so a fresh query right after a close
+// still saw the meeting and the sign stayed ON until the next heartbeat.
+// Drop tabs we've been told are closing. `closing` = { tabs, windows } Sets.
+export function withoutClosingTabs(tabs, closing) {
+  if (!closing) return tabs || [];
+  return (tabs || []).filter(t => !closing.tabs?.has(t.id) && !closing.windows?.has(t.windowId));
+}
+
 // ---- host permissions (P7 / S8) ----------------------------------------
 
 // `scheme://host[:port]/*` permission pattern for a URL (same shape the

@@ -49,6 +49,7 @@ import {
   bodyEncodingFor,
   redirectPolicyFor,
   isRelevantTabUpdate,
+  withoutClosingTabs,
   isSecretHeader,
   urlCarriesSecret,
   urlMatchesPrefix,
@@ -1044,5 +1045,26 @@ describe("retired target types", () => {
       ["httpHook", "iotHybrid"]
     );
     assert.deepEqual(supportedTargets(undefined), []);
+  });
+});
+
+describe("withoutClosingTabs", () => {
+  const tabs = [
+    { id: 1, windowId: 10, url: "https://meet.google.com/abc-defg-hij" },
+    { id: 2, windowId: 10, url: "https://example.com/" },
+    { id: 3, windowId: 20, url: "https://zoom.us/j/1" },
+  ];
+  test("drops tabs that are closing (Firefox still lists them in onRemoved)", () => {
+    const out = withoutClosingTabs(tabs, { tabs: new Set([1]), windows: new Set() });
+    assert.deepEqual(out.map(t => t.id), [2, 3]);
+  });
+  test("drops every tab of a closing window", () => {
+    const out = withoutClosingTabs(tabs, { tabs: new Set(), windows: new Set([10]) });
+    assert.deepEqual(out.map(t => t.id), [3]);
+  });
+  test("passes everything through when nothing is closing", () => {
+    assert.equal(withoutClosingTabs(tabs, { tabs: new Set(), windows: new Set() }).length, 3);
+    assert.equal(withoutClosingTabs(tabs, null).length, 3);
+    assert.deepEqual(withoutClosingTabs(undefined, null), []);
   });
 });

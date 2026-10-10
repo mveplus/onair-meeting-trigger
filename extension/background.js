@@ -28,6 +28,7 @@ import {
   bodyEncodingFor,
   redirectPolicyFor,
   isRelevantTabUpdate,
+  withoutClosingTabs,
   serviceMatchPatterns,
   targetDisplayName,
   summarizeDispatch,
@@ -84,6 +85,14 @@ const DEBOUNCE_MS = 400;
 
 let current = { state: "OFF", service: null, url: null, ts: Date.now() };
 let debounceTimer = null;
+// Tabs/windows just closed — excluded from detection (see withoutClosingTabs).
+// Tab ids aren't reused within a session, so a short TTL is only cleanup.
+const closing = { tabs: new Set(), windows: new Set() };
+const CLOSING_TTL_MS = 10000;
+function markClosing(set, id) {
+  set.add(id);
+  setTimeout(() => set.delete(id), CLOSING_TTL_MS);
+}
 let debugEnabled = false;
 
 // R1: one AbortController per meeting edge. A new edge aborts the previous
@@ -328,7 +337,7 @@ async function loadConfig() {
 async function computeState(cfg) {
   if (cfg.triggerMode === "ACTIVE_TAB") {
     const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    const t = tabs[0] || null;
+    const t = withoutClosingTabs(tabs, closing)[0] || null;
     const svc = matchService(t?.url || "", cfg);
     return svc ? { state: "ON", service: svc, url: t.url } : { state: "OFF", service: null, url: null };
   }
@@ -343,7 +352,7 @@ async function computeState(cfg) {
   } catch {
     tabs = await chrome.tabs.query({});
   }
-  for (const t of tabs) {
+  for (const t of withoutClosingTabs(tabs, closing)) {
     const svc = matchService(t.url || "", cfg);
     if (svc) return { state: "ON", service: svc, url: t.url || null };
   }
@@ -769,10 +778,16 @@ chrome.tabs.onCreated.addListener(() => tick("created"));
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
   if (isRelevantTabUpdate(changeInfo)) tick("updated");
 });
-chrome.tabs.onRemoved.addListener(() => tick("removed"));
+chrome.tabs.onRemoved.addListener(tabId => {
+  markClosing(closing.tabs, tabId);
+  tick("removed");
+});
 chrome.tabs.onActivated.addListener(() => tickIfActiveTabMode("activated"));
 chrome.windows.onFocusChanged.addListener(() => tickIfActiveTabMode("focus"));
-chrome.windows.onRemoved.addListener(() => tick("window-removed"));
+chrome.windows.onRemoved.addListener(windowId => {
+  markClosing(closing.windows, windowId);
+  tick("window-removed");
+});
 
 chrome.runtime.onStartup.addListener(() => {
   ensureReconcileAlarm();

@@ -16,6 +16,10 @@ auto-generated notes and the built `dist.zip`.
 ### Changed
 - Settings text no longer says "Chrome" where it applies to any browser.
 
+### Fixed
+- Closing a meeting tab or window turns the sign off right away in Firefox
+  (it still listed the closing tab, so OFF waited for the 1-minute heartbeat).
+
 ## [0.8.1] — 2026-10-10
 
 ### Changed
