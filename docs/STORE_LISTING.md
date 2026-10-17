@@ -50,7 +50,9 @@ attached to every GitHub release). Its manifest is generated from
 `extension/manifest.json` by `scripts/firefox-manifest.mjs`: add-on ID
 `onair-meeting-trigger@mveplus`, Firefox 140+.
 
-**First submission (one time, by hand):** Developer Hub → *Submit a New
+**Listing:** https://addons.mozilla.org/firefox/addon/on-air-meeting-trigger/ (public).
+
+**First submission (one time, by hand — done):** Developer Hub → *Submit a New
 Add-on* → *On this site* → upload `dist-firefox.zip`. Source code upload is
 not needed — the code isn't minified or bundled.
 
@@ -108,7 +110,7 @@ not needed — the code isn't minified or bundled.
   strings whose dynamic values all pass through the `esc()` HTML-escaper in
   `options.js` / `diagnostics.js`.
 
-**Later versions** go through CI: add the repository secrets
+**Later versions** (0.8.3 on) go through CI using the repository secrets
 `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` (Developer Hub → Tools → *Manage API
 Keys*). Each release tag then submits `dist-firefox.zip` automatically;
 **Actions → Upload to Firefox Add-ons** re-submits a release by hand.

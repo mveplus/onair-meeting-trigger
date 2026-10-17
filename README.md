@@ -7,7 +7,8 @@ local or LAN automations (ON-AIR sign, Home Assistant, Tasmota, Shelly, phone pu
 
 
 ## Quick start
-- Chrome / Chromium extension [published on the Chrome Web Store](https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn?utm_source=item-share-cb); Firefox (140+) build from the same code — Firefox Add-ons listing coming soon
+- Install for **Chrome / Chromium / Edge** from the [Chrome Web Store](https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn?utm_source=item-share-cb)
+- Install for **Firefox** (140+) from [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/on-air-meeting-trigger/) — same code, same features
 - LAN-first, no cloud required e.g. [OnAir Led/Neon sign](https://github.com/mveplus/onair-led-sign-firmware) 
 - Works great with Home Assistant
 - Works without Smart Home hardware — [phone push notifications via Ntfy](docs/ON-AIR-Push-Notifications.md)

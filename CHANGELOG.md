@@ -7,6 +7,11 @@ auto-generated notes and the built `dist.zip`.
 
 ## [Unreleased]
 
+### Changed
+
+- Docs link the [Firefox Add-ons listing](https://addons.mozilla.org/firefox/addon/on-air-meeting-trigger/); privacy policy,
+  templates and push-notification guides now cover Chrome and Firefox alike.
+
 ## [0.8.2] — 2026-10-17
 
 ### Added

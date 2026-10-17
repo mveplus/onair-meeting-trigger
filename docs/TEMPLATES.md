@@ -21,7 +21,7 @@ Webhooks for common devices and services (hover a button for details):
 Template URLs mark what you must fill in as `YOUR_*` (`YOUR_DEVICE_IP`,
 `YOUR_TOPIC`, `YOUR_HA_HOST`, `YOUR_ON_WEBHOOK_ID`…). Until every one is
 replaced, the card shows **⚠ Replace YOUR_…** instead of **Ready**, and the
-extension won't ask Chrome for access to a placeholder host.
+extension won't ask the browser for access to a placeholder host.
 
 ### Removed templates
 
@@ -92,7 +92,7 @@ Fields:
 | OFF mode | `0` off (typical) | `0` |
 | Local timeout (ms) | How long to wait before fallover | `1500` is a sensible default |
 
-## Heads-up: `*.local` (mDNS) in MV3 service workers
+## Heads-up: `*.local` (mDNS) in Chromium on Linux
 
 A `*.local` address (e.g. `http://onair.local` or
 `homeassistant.local`) **resolves fine from the shell** (`curl`, `getent`) but generally

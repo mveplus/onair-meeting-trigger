@@ -210,8 +210,7 @@ or unpacked:
 
 ### Firefox (140 or newer)
 
-From Firefox Add-ons (addons.mozilla.org — listing coming soon), or for
-development:
+From [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/on-air-meeting-trigger/), or for development:
 
 1. Run `scripts/build-zip.sh` — it builds `dist-firefox.zip` with the
    Firefox manifest (the `extension/` folder itself is the Chrome version).
