@@ -1,6 +1,6 @@
 # Terms of Service — ON-AIR Meeting Trigger
 
-**Last updated:** 2026-05-30
+**Last updated:** 2026-10-10
 
 ## 1. Acceptance
 By installing or using the ON-AIR Meeting Trigger browser extension

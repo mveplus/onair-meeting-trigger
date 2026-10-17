@@ -1,6 +1,6 @@
 # ON-AIR Push Notifications – Delivery Options
 
-This document describes **three supported ways** to deliver ON-AIR / OFF-AIR push notifications from the **ON-AIR Chrome Extension** (or any HTTP-capable tool such as `curl`) to family members’ devices.
+This document describes **three supported ways** to deliver ON-AIR / OFF-AIR push notifications from the **ON-AIR Meeting Trigger** browser extension for Chrome or Firefox (or any HTTP-capable tool such as `curl`) to family members’ devices.
 
 All options use **simple HTTP calls**: in the extension each one is a
 **Webhook** target (Settings → Targets). For ntfy there's a one-click
@@ -29,7 +29,7 @@ curl -H "Priority: 5" \
      https://ntfy.sh/my-meeting-super-secret-link-2012-3456
 ```
 
-### ON-AIR (Chrome extension – GET)
+### ON-AIR (extension – GET)
 ```
 https://ntfy.sh/my-meeting-super-secret-link-2012-3456/publish?title=%F0%9F%93%9E%20ON-AIR&message=I%27m%20in%20a%20meeting&priority=urgent
 ```
@@ -44,7 +44,7 @@ curl -H "Priority: 2" \
      https://ntfy.sh/my-meeting-super-secret-link-2012-3456
 ```
 
-### OFF-AIR (Chrome extension – GET)
+### OFF-AIR (extension – GET)
 ```
 https://ntfy.sh/my-meeting-super-secret-link-2012-3456/publish?title=%E2%9C%85%20OFF-AIR&message=Meeting%20ended&priority=low
 ```
@@ -71,7 +71,7 @@ curl -s \
   --form-string "message=I'm in a meeting" \
   https://api.pushover.net/1/messages.json
 ```
-#### ON-AIR (Chrome extension – POST)
+#### ON-AIR (extension – POST)
 
 **URL**
 ```
@@ -103,7 +103,7 @@ curl -s \
   --form-string "message=Meeting ended" \
   https://api.pushover.net/1/messages.json
 ```
-#### OFF-AIR (Chrome extension – POST)
+#### OFF-AIR (extension – POST)
 
 **URL**
 ```
@@ -141,7 +141,7 @@ curl -s -X POST "https://api.telegram.org/botBOT_TOKEN/sendMessage" \
   --data-urlencode "text=📞 ON-AIR — I'm in a meeting"
 ```
 
-### ON-AIR (Chrome Extension — HTTP POST)
+### ON-AIR (extension — HTTP POST)
 
 **URL**
 ```
@@ -170,7 +170,7 @@ curl -s -X POST "https://api.telegram.org/botBOT_TOKEN/sendMessage" \
   --data-urlencode "text=✅ OFF-AIR — Meeting ended"
 ```
 
-### OFF-AIR (Chrome Extension — HTTP POST)
+### OFF-AIR (extension — HTTP POST)
 
 Same URL, method and header as ON-AIR, with this body:
 

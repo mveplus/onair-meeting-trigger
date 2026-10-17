@@ -1,9 +1,11 @@
 # Privacy Policy — ON-AIR Meeting Trigger
 
-**Last updated:** 2026-10-10 (Firefox build added)
+**Last updated:** 2026-10-17
 
 ## Overview
 ON-AIR Meeting Trigger is a privacy-first browser extension designed to detect when the user is in an online meeting and signal that state to user-configured endpoints. The extension operates entirely on the user’s device.
+
+This policy covers every build of the extension: the [Chrome Web Store](https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn?utm_source=item-share-cb) version (Chrome, Chromium, Edge and other Chromium-based browsers), the [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/on-air-meeting-trigger/) version, and builds made from the source code. They share the same code and behave the same way.
 
 ## Data collection
 This extension does **not** collect, store, sell, or transmit user data to the developer or any third party.
