@@ -8,7 +8,7 @@ By installing or using the ON-AIR Meeting Trigger browser extension
 you do not agree, do not install or use the Extension.
 
 ## 2. What the Extension is
-The Extension is a free, open-source Chromium/Chrome browser extension
+The Extension is a free, open-source browser extension for Chromium-based browsers and Firefox
 that detects when tabs matching configured meeting services (Google
 Meet, Microsoft Teams, Zoom, or user-defined services) are open or
 active, and sends HTTP requests to **endpoints you configure
@@ -18,7 +18,7 @@ yourself** to signal that state. It runs entirely on your device.
 The source code is released under the [MIT License](../LICENSE). You
 may fork, modify, and redistribute it under those terms. These Terms
 supplement (and do not replace) the MIT License for the published
-build distributed via the Chrome Web Store.
+builds distributed via the Chrome Web Store and Firefox Add-ons (addons.mozilla.org).
 
 ## 4. No account, no fee
 The Extension does not require you to create an account or pay any
@@ -46,10 +46,11 @@ You are solely responsible for:
 
 ## 6. Third-party services
 The Extension is distributed via the [Chrome Web Store](https://chromewebstore.google.com/)
-and your use of it is also governed by Google's terms for the store.
+and [Firefox Add-ons](https://addons.mozilla.org/), and your use of it is also governed by
+Google's or Mozilla's terms for the store you install it from.
 If you opt to use the AWS IoT cloud-bridge integration documented in
 the project, your use of Amazon Web Services is governed by AWS's own
-terms. The maintainer is not party to either of those agreements.
+terms. The maintainer is not party to any of those agreements.
 
 ## 7. Privacy
 The Extension does not collect or transmit personal data to the

@@ -7,6 +7,23 @@ auto-generated notes and the built `dist.zip`.
 
 ## [Unreleased]
 
+### Added
+- **Firefox** (140+): the same extension, packaged as `dist-firefox.zip`
+  with a Firefox manifest generated at build time; release CI submits it to
+  Firefox Add-ons (AMO), and **Actions → Upload to Firefox Add-ons**
+  re-submits a release.
+
+### Changed
+- Settings text no longer says "Chrome" where it applies to any browser.
+
+### Fixed
+- Closing a meeting tab or window turns the sign off right away in Firefox
+  (it still listed the closing tab, so OFF waited for the 1-minute heartbeat).
+- Two browsers (or computers) sharing one sign no longer fight over it: the
+  one without a meeting used to switch the sign off on every 1-minute
+  heartbeat. While idle, the heartbeat now only retries an OFF of its own
+  that didn't reach the sign.
+
 ## [0.8.1] — 2026-10-10
 
 ### Changed

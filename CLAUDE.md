@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-**ON-AIR Meeting Trigger** is a Chromium MV3 browser extension. It detects Meet/Zoom/Teams/custom
+**ON-AIR Meeting Trigger** is an MV3 browser extension for Chrome/Chromium and Firefox (140+). It detects Meet/Zoom/Teams/custom
 meeting tabs and triggers a local/remote http/s service and/or an ON-AIR LED sign on the LAN (and
 beyond). Pairs with the `onair-led-sign-firmware` project.
 
@@ -20,10 +20,12 @@ extension/         The MV3 extension (this is what ships)
   icons/
 tests/             Node built-in test runner specs for shared.js (`npm test`)
 package.json       `type:module`; `npm test` → `node --test`
-scripts/           Release tooling (build-zip.sh, release.sh, gen-build-info.sh)
+scripts/           Release tooling (build-zip.sh, release.sh, gen-build-info.sh,
+                   cws-upload.sh, amo-submit.sh, firefox-manifest.mjs)
                    + make-store-shots.sh (Chrome Web Store tiles)
 .github/workflows/release.yml   Tag-triggered release + Chrome Web Store upload
 VERSION            Mirror of manifest version, bumped by release.sh
+.claude/skills/release/  Release checklist skill (cut → watch CI → store results)
 CHANGELOG.md       Keep-a-Changelog history; [Unreleased] collects merged PRs
 docs/, resources/  Documentation and store assets
 ```
@@ -37,6 +39,15 @@ docs/, resources/  Documentation and store assets
   the live dispatch and the options "Test" buttons in agreement, and what the
   tests exercise. Keep `shared.js` free of `chrome.*`, `window`, `document`, and
   `fetch` at import time.
+- **Firefox build:** `extension/` is the Chrome package. `scripts/firefox-manifest.mjs`
+  (`toFirefoxManifest`, tested) derives the Firefox manifest at build time:
+  `background.scripts` instead of `service_worker` (Firefox MV3 has no
+  extension service workers — it runs background.js as a module event page),
+  `options_ui` instead of `options_page`, and `browser_specific_settings.gecko`
+  (id `onair-meeting-trigger@mveplus`, min 140, `data_collection_permissions:
+  none`). `build-zip.sh` writes `dist.zip` + `dist-firefox.zip`. Keep code
+  browser-neutral (`chrome.*` works in both); `permissions.request` must stay
+  the first `await` of a click (Firefox enforces the user gesture strictly).
 - **Credentials never sync.** Tokens (`localToken`, `cloudToken`,
   `basicAuth.pass`, `Authorization`/`X-API-Token` headers) live in
   `chrome.storage.local` via `extractSecrets`/`applySecrets`; only the sanitized
@@ -61,7 +72,11 @@ docs/, resources/  Documentation and store assets
   `/api/status` on the LAN (`readIotLocalMode` + `parseDeviceMode`) and falls
   back to the cloud bridge's shadow read (`readIotCloudMode` → `GET ?thing=…` →
   `parseCloudStateMode`) when off-network; drift via `reconcileDrift`.
-  `reconcilePass()` runs only on `reason === "alarm"`.
+  `reconcilePass()` runs only on `reason === "alarm"`. While this browser
+  is OFF the heartbeat holds (`heartbeatShouldFire`): it only retries a
+  target whose own OFF failed (`trackOffFailures` → `offFailed` in
+  storage.session), so an idle browser can't switch off a sign another
+  browser's meeting turned on.
   (Cloud readback is served by the firmware Device Shadow + Lambda GET in the
   `onair-led-sign-firmware` repo.)
 - **Diagnostics:** an opt-in ring buffer (`activityLog` in `storage.local`, cap
@@ -208,6 +223,12 @@ the secret, then use the manual upload workflow):
 - `CWS_REFRESH_TOKEN` — long-lived refresh token captured once
 - `CWS_PUBLISHER_ID` — publisher id from the developer console (needed by the v2 API)
 - `CWS_EXTENSION_ID` — the 32-char id from the CWS URL
+- `AMO_JWT_ISSUER`, `AMO_JWT_SECRET` — addons.mozilla.org API key/secret for
+  step 6 (**Submit to Firefox Add-ons**, `scripts/amo-submit.sh` → `web-ext
+  sign --channel listed`). Missing → the step skips with a warning; a failed
+  submission is `continue-on-error`. Re-submit with **Actions → Upload to
+  Firefox Add-ons** (`amo-upload.yml`). The first AMO version is uploaded by
+  hand (see `docs/STORE_LISTING.md`).
 
 ### Notes / gotchas
 
@@ -221,6 +242,29 @@ the secret, then use the manual upload workflow):
 ## Local build / smoke test
 
 ```bash
-scripts/build-zip.sh          # produces dist.zip from extension/
-# Load unpacked: chrome://extensions → Developer mode → Load unpacked → select extension/
+scripts/build-zip.sh          # produces dist.zip + dist-firefox.zip from extension/
+# Chrome:  chrome://extensions → Developer mode → Load unpacked → select extension/
+# Firefox: about:debugging → This Firefox → Load Temporary Add-on → dist-firefox.zip
+npx --yes web-ext@8 lint -s <unzipped dist-firefox.zip>   # AMO's validator, locally
 ```
+
+When a smoke test touches a real sign, close (or update) the extension in
+every other browser first — an old build in another browser still runs its
+heartbeat against the same sign and makes results look flaky.
+
+### Firefox / AMO gotchas (learned the hard way)
+
+- `tabs.query` still returns a closing tab (and a closing window's tabs)
+  while `onRemoved` listeners run — hence `withoutClosingTabs`. Expect more
+  "Chrome is instant, Firefox lags" bugs to be event-ordering differences.
+- The event page unloads when idle: "Service worker started" every minute in
+  Diagnostics is normal; anything held only in module globals is lost.
+- Don't add `browser_specific_settings.gecko_android`: AMO then ticks and
+  locks *Firefox for Android* compatibility. The resulting "Android 140 <
+  142 for data_collection_permissions" warning is advisory — accept it.
+- The 12 `UNSAFE_VAR_ASSIGNMENT` (innerHTML) warnings are expected; every
+  dynamic value goes through `esc()`. The reviewer note is in
+  `docs/STORE_LISTING.md`. Keep new HTML-building code on `esc()` too.
+- "Do you need to submit source code?" → **No** (no bundler/minifier).
+- AMO rejects re-uploading an existing version number; a version uploaded by
+  hand in the Developer Hub can't also be submitted by CI.

@@ -206,6 +206,32 @@ export function reconcileDrift(desiredMode, actualMode) {
   return clampMode(actualMode, -1) !== clampMode(desiredMode, -1);
 }
 
+// Heartbeat policy while this browser sees no meeting. OFF here only means
+// "no meeting in *this* browser" — another browser or computer driving the
+// same sign may be in one. Re-asserting OFF there made two browsers fight:
+// the idle one switched the sign off every minute and the one in the meeting
+// switched it back on. So when OFF, the heartbeat only retries a target whose
+// own OFF edge failed; once our OFF landed (or we never sent one), the sign
+// is left alone. ON is always kept up.
+export function heartbeatShouldFire(state, offFailed) {
+  return state === "ON" || offFailed === true;
+}
+
+// Track which targets' OFF didn't land, from dispatch results. An ON edge
+// clears it (a new OFF edge follows); an OFF edge / remediation records each
+// target that fired: failed → true, delivered → dropped. Superseded,
+// skipped and no-op results leave the entry as it was.
+export function trackOffFailures(prev, results, state) {
+  if (state === "ON") return {};
+  const out = { ...(prev || {}) };
+  for (const r of results || []) {
+    if (!r?.id || r.superseded || r.skipped || r.noop) continue;
+    if (r.ok === false) out[r.id] = true;
+    else if (r.ok === true) delete out[r.id];
+  }
+  return out;
+}
+
 // Parse the cloud bridge's state-read response into a normalized mode
 // (0|1|2), or null when it isn't determinable. The Lambda GET returns
 // { ok, thing, mode, reported, ts } read from the device's AWS IoT
@@ -859,6 +885,15 @@ export function settingsSignature(cfg) {
 // can change which meeting service matches.
 export function isRelevantTabUpdate(changeInfo) {
   return changeInfo?.url !== undefined || changeInfo?.status === "complete";
+}
+
+// Firefox still lists a tab (and a closing window's tabs) in tabs.query
+// while its onRemoved listeners run, so a fresh query right after a close
+// still saw the meeting and the sign stayed ON until the next heartbeat.
+// Drop tabs we've been told are closing. `closing` = { tabs, windows } Sets.
+export function withoutClosingTabs(tabs, closing) {
+  if (!closing) return tabs || [];
+  return (tabs || []).filter(t => !closing.tabs?.has(t.id) && !closing.windows?.has(t.windowId));
 }
 
 // ---- host permissions (P7 / S8) ----------------------------------------

@@ -773,7 +773,7 @@ async function testTargetNode(node, t, state) {
   // preflight. Each click is a user gesture, so it can show the (single —
   // P7) Chrome dialog; this must stay the first await.
   if (!(await ensureHostPermissions(getOriginsFromTargets({ targets: [target] })))) {
-    return show("fail", `Test ${state}: Not allowed — Chrome access to this address was declined`);
+    return show("fail", `Test ${state}: Not allowed — access to this address was declined`);
   }
   show("busy", `Testing ${state}…`);
 
@@ -964,7 +964,7 @@ function refreshDirty() {
   const missing = missingOrigins(getOriginsFromTargets(ui), grantedOrigins)
     .map(o => o.replace(/^https?:\/\//, "").replace(/\/\*$/, ""));
   $("savebar_msg").textContent = missing.length
-    ? `Unsaved target changes — Chrome will ask to allow access to ${missing.join(", ")}`
+    ? `Unsaved target changes — your browser will ask to allow access to ${missing.join(", ")}`
     : "Unsaved target changes";
 }
 

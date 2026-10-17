@@ -1,5 +1,6 @@
 # Build artifacts
 dist.zip
+dist-firefox.zip
 
 # Generated per-build dev metadata (see scripts/gen-build-info.sh)
 extension/build-info.json

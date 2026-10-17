@@ -1,6 +1,6 @@
 # Privacy Policy — ON-AIR Meeting Trigger
 
-**Last updated:** 2026-10-10
+**Last updated:** 2026-10-10 (Firefox build added)
 
 ## Overview
 ON-AIR Meeting Trigger is a privacy-first browser extension designed to detect when the user is in an online meeting and signal that state to user-configured endpoints. The extension operates entirely on the user’s device.
@@ -53,7 +53,7 @@ This data is sent **only** to endpoints configured by the user and is not retain
 ## Authentication
 If an endpoint requires authentication (for example, the Home Assistant REST API or an AWS IoT cloud bridge), credentials or tokens are provided directly by the user.
 
-- Credentials are stored in the browser's **local** extension storage (`chrome.storage.local`) and are **not** synced to the user's browser/Google account.
+- Credentials are stored in the browser's **local** extension storage (`storage.local`) and are **not** synced to the user's browser account (Google or Firefox account).
 - Credentials are **excluded from exported settings files** by default; the user must explicitly opt in to include them.
 - The extension does not intercept, transmit, or reuse authentication data for any purpose other than calling the endpoints the user configured.
 
@@ -63,7 +63,7 @@ The developer does not have access to any data generated or transmitted by the e
 No data is shared with advertisers, analytics providers, or external services.
 
 ## Changes
-If this privacy policy changes in the future, it will be updated in the project repository and reflected in the Chrome Web Store listing.
+If this privacy policy changes in the future, it will be updated in the project repository and reflected in the Chrome Web Store and Firefox Add-ons listings.
 
 ## Contact
 Please use the project issue tracker for privacy questions:
