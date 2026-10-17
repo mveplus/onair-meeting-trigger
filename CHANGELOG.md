@@ -7,6 +7,8 @@ auto-generated notes and the built `dist.zip`.
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-10-17
+
 ### Added
 - **Firefox** (140+): the same extension, packaged as `dist-firefox.zip`
   with a Firefox manifest generated at build time; release CI submits it to
@@ -196,7 +198,8 @@ auto-generated notes and the built `dist.zip`.
 ### Fixed
 - Dark-theme coverage; settings inputs containing quotes (0.1.9).
 
-[Unreleased]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mveplus/onair-meeting-trigger/compare/v0.6.0...v0.7.0
