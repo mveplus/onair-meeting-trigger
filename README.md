@@ -17,6 +17,8 @@ local or LAN automations (ON-AIR sign, Home Assistant, Tasmota, Shelly, phone pu
   
 👉 **Templates guide:**  [docs/TEMPLATES.md](docs/TEMPLATES.md)
 
+👉 **How it works (interactive):**  [mveplus.github.io/onair-meeting-trigger/how-it-works.html](https://mveplus.github.io/onair-meeting-trigger/how-it-works.html) — every component explained, with a simulator you can run
+
 ## Features
 - Meeting detection (Meet / Teams / Zoom)
 - Custom service detection (user-defined URL prefixes)
