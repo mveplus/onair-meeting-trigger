@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ON-AIR Meeting Trigger</title>
+<meta name="description" content="A free browser extension for Chrome and Firefox that turns on an ON-AIR sign, smart plug, Home Assistant automation or phone notification when you join Google Meet, Teams or Zoom.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one landing column. Hero with the lit tally and the two install
+   buttons, then what it switches, three steps, privacy, links. Same tokens
+   as how-it-works.html so the two pages read as one site. */
+:root {
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --sunken: #e9ebef;
+  --ink: #15171c;
+  --muted: #5a606d;
+  --line: #d9dce3;
+  --tally: #d1232e;
+  --tally-soft: #fbe3e4;
+  --tally-ink: #ffffff;
+  --info: #2c5fa8;
+  --font-display: "Big Shoulders Display", "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101216; --surface: #171a20; --sunken: #1e222a; --ink: #e7e9ee; --muted: #9aa0ad;
+    --line: #2a2f39; --tally: #ff4b55; --tally-soft: #3b1619; --tally-ink: #1a0507; --info: #79a8f0;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--font-body); -webkit-font-smoothing: antialiased; }
+a { color: var(--info); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--tally); outline-offset: 2px; }
+img { max-width: 100%; height: auto; display: block; }
+code { font-family: var(--font-mono); font-size: 0.875em; background: var(--sunken); padding: 0.1em 0.35em; border-radius: 4px; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; }
+.eyebrow { font: 500 0.75rem/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+
+/* Hero */
+.hero { background: var(--surface); border-bottom: 1px solid var(--line); }
+.hero .wrap { padding-block: 56px 48px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 48px; align-items: center; }
+.tally {
+  display: inline-block; font: 800 1.6rem/1 var(--font-display); letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 10px 18px 8px; border-radius: 8px; background: var(--tally); color: var(--tally-ink); border: 3px solid var(--tally);
+  box-shadow: 0 0 0 5px var(--tally-soft), 0 0 32px 2px color-mix(in srgb, var(--tally) 40%, transparent);
+}
+h1 { font: 800 clamp(2.6rem, 6vw, 4.2rem)/0.95 var(--font-display); text-transform: uppercase; letter-spacing: 0.01em; margin: 24px 0 16px; }
+.lede { font-size: 1.15rem; color: var(--muted); max-width: 52ch; margin: 0; }
+.lede strong { color: var(--ink); font-weight: 600; }
+.cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 6px;
+  font: 600 0.95rem var(--font-body); text-decoration: none; border: 1px solid var(--line); color: var(--ink); background: var(--surface);
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.hot { background: var(--tally); color: var(--tally-ink); border-color: var(--tally); }
+.small { font-size: 0.85rem; color: var(--muted); margin: 12px 0 0; }
+.shot { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--sunken); }
+
+/* Sections */
+main section { padding-block: 56px; border-bottom: 1px solid var(--line); }
+main section:last-child { border-bottom: 0; }
+h2 { font: 700 clamp(1.9rem, 3.6vw, 2.5rem)/1 var(--font-display); text-transform: uppercase; letter-spacing: 0.02em; margin: 0 0 24px; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 20px; min-width: 0; }
+.card h3 { margin: 0 0 6px; font: 600 1.05rem/1.3 var(--font-body); }
+.card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; counter-reset: s; }
+.steps li { counter-increment: s; border-top: 3px solid var(--ink); padding-top: 14px; min-width: 0; }
+.steps li::before { content: counter(s, decimal-leading-zero); font: 500 0.85rem var(--font-mono); color: var(--tally); }
+.steps h3 { margin: 4px 0 6px; font: 600 1.05rem/1.3 var(--font-body); }
+.steps p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+.guide {
+  margin-top: 32px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: center;
+  background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--tally); border-radius: 0 8px 8px 0; padding: 20px 24px;
+}
+.guide h3 { margin: 0 0 4px; font: 600 1.1rem/1.3 var(--font-body); }
+.guide p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-width: 72ch; }
+.checks li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; }
+.checks li::before { content: "✓"; color: var(--tally); font-weight: 600; }
+.links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 24px; }
+.links a { display: block; padding: 8px 0; border-top: 1px solid var(--line); text-decoration: none; color: var(--ink); min-width: 0; }
+.links a span { display: block; font-size: 0.85rem; color: var(--muted); }
+footer { background: var(--surface); border-top: 1px solid var(--line); font-size: 0.85rem; color: var(--muted); }
+footer .wrap { padding-block: 22px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
+footer a { color: inherit; }
+
+@media (max-width: 860px) {
+  .hero .wrap { grid-template-columns: minmax(0, 1fr); gap: 32px; padding-block: 40px; }
+  .grid, .steps, .links { grid-template-columns: minmax(0, 1fr); }
+  .grid.two { grid-template-columns: minmax(0, 1fr); }
+  .guide { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <span class="tally" aria-hidden="true">On Air</span>
+      <h1>ON-AIR Meeting Trigger</h1>
+      <p class="lede">A free browser extension that tells your home you're in a meeting. When you open <strong>Google Meet, Microsoft Teams or Zoom</strong>, it turns on an ON-AIR sign, a smart plug, a Home Assistant automation or a push notification to your phone. When the meeting ends, it turns them off.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://chromewebstore.google.com/detail/dhcgpjlbnchcbnpplfidkfbfmapokhfn">Add to Chrome</a>
+        <a class="btn primary" href="https://addons.mozilla.org/firefox/addon/on-air-meeting-trigger/">Add to Firefox</a>
+        <a class="btn hot" href="how-it-works.html">See how it works →</a>
+      </div>
+      <p class="small">Works in Chrome, Edge, Brave and other Chromium browsers, and Firefox 140+. Open source, no account, no telemetry.</p>
+    </div>
+    <div class="shot">
+      <img src="https://raw.githubusercontent.com/mveplus/onair-meeting-trigger/main/resources/Screenshot_OnAir_popup.png" width="1900" height="636" alt="The toolbar popup in three states: Off air, ON AIR in Google Meet, and Paused">
+    </div>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="wrap">
+      <h2>What it can switch</h2>
+      <div class="grid">
+        <div class="card"><h3>An ON-AIR sign</h3><p>The companion <a href="https://github.com/mveplus/onair-led-sign-firmware">ESP32 LED sign</a>, solid or breathing. It talks to the sign on your network first and uses your own cloud bridge when you're away.</p></div>
+        <div class="card"><h3>Smart plugs and relays</h3><p>One-click templates for Tasmota and Shelly. Plug a lamp or an existing "on air" light into one.</p></div>
+        <div class="card"><h3>Home Assistant</h3><p>Trigger any automation through a webhook: dim the lights, mute a speaker, set a "do not disturb" status.</p></div>
+        <div class="card"><h3>Your phone</h3><p>Push notifications through <a href="https://ntfy.sh">ntfy</a> when a meeting starts and ends. No hardware needed.</p></div>
+        <div class="card"><h3>Any web address</h3><p>A webhook with your own ON and OFF URLs, method, headers and body, for anything with an HTTP API.</p></div>
+        <div class="card"><h3>Other meeting sites</h3><p>Add Jitsi, Webex, Whereby or any site by its address. It counts as a meeting just like Meet, Teams and Zoom.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li><h3>It spots the meeting</h3><p>The extension looks only at tab addresses. When one belongs to a meeting site, you're on air. It never reads the page itself.</p></li>
+        <li><h3>It sends one request to each output</h3><p>Every enabled output gets one request when the meeting starts and one when it ends. The popup shows whether each one worked.</p></li>
+        <li><h3>It keeps things in sync</h3><p>A check every minute fixes a sign that someone switched off by hand or that missed a command, without repeating your phone notifications.</p></li>
+      </ol>
+      <div class="guide">
+        <div>
+          <h3>The full technical guide, with a simulator</h3>
+          <p>Every component and what the code does: detection, outputs, retries, sync, storage and secrets. Includes a simulator you can run in the page.</p>
+        </div>
+        <a class="btn hot" href="how-it-works.html">Open the guide →</a>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Private by design</h2>
+      <ul class="checks">
+        <li>Requests go only to the addresses you set up. Nothing is sent to the developer or anyone else.</li>
+        <li>By default only the meeting site is shared, like <code>https://meet.google.com</code>. The meeting ID is sent only if you turn that on.</li>
+        <li>Passwords and tokens stay on this device. They are never synced to your Google or Firefox account and are left out of exported settings.</li>
+        <li>The browser asks your permission for each address before the extension can contact it.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Learn more</h2>
+      <div class="links">
+        <a href="how-it-works.html">How it works<span>Technical guide and simulator</span></a>
+        <a href="https://github.com/mveplus/onair-meeting-trigger/blob/main/extension/README.md">User guide<span>Popup, settings and every option</span></a>
+        <a href="https://github.com/mveplus/onair-meeting-trigger/blob/main/docs/TEMPLATES.md">Templates<span>Tasmota, Shelly, Home Assistant, ntfy</span></a>
+        <a href="https://github.com/mveplus/onair-meeting-trigger/blob/main/docs/ON-AIR-Push-Notifications.md">Phone notifications<span>Set up ntfy in two minutes</span></a>
+        <a href="https://github.com/mveplus/onair-led-sign-firmware">ON-AIR sign firmware<span>Build the ESP32 sign</span></a>
+        <a href="https://github.com/mveplus/onair-meeting-trigger">Source code<span>GitHub repository</span></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>ON-AIR Meeting Trigger · open source</span>
+    <span><a href="https://github.com/mveplus/onair-meeting-trigger/blob/main/docs/PRIVACY.md">Privacy</a> · <a href="https://github.com/mveplus/onair-meeting-trigger/blob/main/docs/TERMS_OF_SERVICE.md">Terms</a> · <a href="https://github.com/mveplus/onair-meeting-trigger/blob/main/CHANGELOG.md">Changelog</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
