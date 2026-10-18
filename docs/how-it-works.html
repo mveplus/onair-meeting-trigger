@@ -1,0 +1,1227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inside ON-AIR Meeting Trigger</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="How the ON-AIR Meeting Trigger browser extension detects meetings and drives signs, plugs and webhooks: every component, with a runnable simulator.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: broadcast-control-room manual. A sticky contents rail beside a
+   ~70ch reading column; the simulator and diagrams break out wider. The one
+   loud element is the lit ON AIR tally; everything else stays quiet. */
+:root {
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --sunken: #e9ebef;
+  --ink: #15171c;
+  --muted: #5a606d;
+  --line: #d9dce3;
+  --tally: #d1232e;
+  --tally-soft: #fbe3e4;
+  --tally-ink: #ffffff;
+  --good: #1d7f55;
+  --warn: #a86a12;
+  --info: #2c5fa8;
+  --unlit: #c9ccd3;
+  --font-display: "Big Shoulders Display", "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101216; --surface: #171a20; --sunken: #1e222a; --ink: #e7e9ee; --muted: #9aa0ad;
+    --line: #2a2f39; --tally: #ff4b55; --tally-soft: #3b1619; --tally-ink: #1a0507;
+    --good: #43c98d; --warn: #e2a64a; --info: #79a8f0; --unlit: #343944;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101216; --surface: #171a20; --sunken: #1e222a; --ink: #e7e9ee; --muted: #9aa0ad;
+  --line: #2a2f39; --tally: #ff4b55; --tally-soft: #3b1619; --tally-ink: #1a0507;
+  --good: #43c98d; --warn: #e2a64a; --info: #79a8f0; --unlit: #343944;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation: none !important; transition: none !important; } }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--info); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--tally); outline-offset: 2px;
+}
+code, pre, kbd { font-family: var(--font-mono); font-size: 0.875em; }
+:not(pre) > code { background: var(--sunken); padding: 0.1em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+pre {
+  margin: 0; background: var(--sunken); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px; overflow-x: auto; line-height: 1.5; font-size: 0.82rem;
+}
+pre .c { color: var(--muted); }
+pre .k { color: var(--tally); }
+pre .s { color: var(--good); }
+
+.gutter {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* Masthead */
+.masthead { border-bottom: 1px solid var(--line); background: var(--surface); }
+.masthead-inner {
+  max-width: 1180px; margin: 0 auto; padding-block: 40px 36px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 32px; align-items: center;
+}
+.eyebrow { font: 500 0.75rem/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+h1, h2, h3 { text-wrap: balance; }
+h1 {
+  font: 800 clamp(2.6rem, 6vw, 4.4rem)/0.95 var(--font-display); letter-spacing: 0.01em;
+  text-transform: uppercase; margin: 12px 0 16px;
+}
+.lede { font-size: 1.125rem; max-width: 60ch; color: var(--muted); margin: 0; }
+.lede strong { color: var(--ink); font-weight: 600; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 20px; font: 0.85rem var(--font-mono); color: var(--muted); }
+.meta-row a { color: inherit; }
+
+/* The tally sign (used in the masthead and the simulator) */
+.tally {
+  font: 800 2.1rem/1 var(--font-display); letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 14px 22px 12px; border-radius: 8px; border: 3px solid var(--unlit);
+  color: var(--unlit); background: var(--sunken); white-space: nowrap; user-select: none;
+  transition: background 0.25s, color 0.25s, box-shadow 0.25s, border-color 0.25s;
+}
+.tally.lit {
+  background: var(--tally); color: var(--tally-ink); border-color: var(--tally);
+  box-shadow: 0 0 0 6px var(--tally-soft), 0 0 40px 4px color-mix(in srgb, var(--tally) 45%, transparent);
+}
+.masthead .tally { font-size: clamp(1.8rem, 4vw, 2.8rem); cursor: pointer; }
+.masthead .tally-wrap { display: grid; justify-items: center; gap: 8px; }
+.masthead .tally-hint { font: 0.75rem var(--font-mono); color: var(--muted); }
+
+/* Page shell */
+.shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; padding-block: 40px 80px; }
+.toc { position: sticky; top: 24px; align-self: start; font-size: 0.875rem; }
+.toc p { margin: 0 0 10px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: toc; }
+.toc li { counter-increment: toc; }
+.toc a { display: flex; gap: 10px; padding: 5px 8px; border-radius: 4px; color: var(--muted); text-decoration: none; }
+.toc a::before { content: counter(toc, decimal-leading-zero); font: 0.75rem/1.9 var(--font-mono); color: var(--line); }
+.toc a:hover, .toc a.active { background: var(--surface); color: var(--ink); }
+.toc a.active::before { color: var(--tally); }
+
+main { min-width: 0; display: grid; gap: 72px; }
+section { min-width: 0; display: grid; gap: 18px; scroll-margin-top: 20px; }
+section > p, section > ul, section > ol, .prose { max-width: 70ch; margin: 0; }
+section > ul, section > ol { padding-left: 1.2em; display: grid; gap: 6px; }
+h2 {
+  font: 700 clamp(1.9rem, 3.6vw, 2.5rem)/1 var(--font-display); text-transform: uppercase; letter-spacing: 0.02em;
+  margin: 0; display: flex; align-items: baseline; gap: 14px;
+}
+h2 .num { font: 500 0.8rem var(--font-mono); color: var(--tally); letter-spacing: 0.08em; }
+h3 { font: 600 1.1rem/1.3 var(--font-body); margin: 10px 0 0; }
+.kicker { color: var(--muted); font-size: 1.05rem; max-width: 66ch; margin: -6px 0 0; }
+.file { font: 500 0.8rem var(--font-mono); color: var(--muted); }
+
+/* Diagrams */
+.figure { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; }
+.figure svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.figcap { font-size: 0.85rem; color: var(--muted); margin: -8px 0 0; }
+svg text { font-family: var(--font-body); fill: var(--ink); }
+svg .t-mono { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
+svg .t-head { font-weight: 600; font-size: 14px; }
+svg .t-group { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; fill: var(--muted); }
+svg .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+svg .box-core { fill: var(--sunken); stroke: var(--ink); stroke-width: 1.5; }
+svg .box-hot { fill: var(--tally-soft); stroke: var(--tally); stroke-width: 1.5; }
+svg .grp { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 5 5; }
+svg .wire { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+svg .wire-hot { fill: none; stroke: var(--tally); stroke-width: 2; }
+svg .arrow { fill: var(--muted); }
+svg .arrow-hot { fill: var(--tally); }
+
+/* Simulator */
+.sim { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); overflow: hidden; }
+.sim-col { padding: 20px; display: grid; gap: 18px; align-content: start; min-width: 0; }
+.sim-col + .sim-col { border-left: 1px solid var(--line); background: var(--bg); }
+.sim h4 { margin: 0 0 8px; font: 500 0.72rem var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+button {
+  font: 500 0.85rem var(--font-body); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 5px; padding: 7px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+button.ghost { background: transparent; }
+.tabs { display: grid; gap: 6px; }
+.tab {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  border: 1px solid var(--line); border-radius: 5px; padding: 6px 6px 6px 10px; background: var(--surface);
+  font: 0.8rem var(--font-mono);
+}
+.tab.active { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--ink); }
+.tab .url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: 0; padding: 0; text-align: left; font: inherit; color: var(--ink); }
+.tab .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--unlit); }
+.tab .dot.match { background: var(--tally); }
+.tab .x { padding: 2px 8px; font-size: 0.8rem; }
+.empty-tabs { font-size: 0.85rem; color: var(--muted); }
+.settings { display: grid; gap: 8px; font-size: 0.9rem; }
+.settings label { display: flex; gap: 8px; align-items: center; }
+.settings select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); }
+.outputs { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; }
+.devices { display: grid; gap: 8px; font-size: 0.85rem; }
+.device { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.device b { font-weight: 600; }
+.pill { font: 500 0.72rem var(--font-mono); padding: 2px 8px; border-radius: 99px; background: var(--sunken); color: var(--muted); white-space: nowrap; }
+.pill.on { background: var(--tally); color: var(--tally-ink); }
+.pill.good { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+.pill.bad { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+.phone { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--surface); display: grid; gap: 6px; font-size: 0.8rem; }
+.phone .note { border-radius: 6px; padding: 6px 8px; background: var(--sunken); }
+.phone .note b { display: block; font-weight: 600; }
+.phone .note.dup { box-shadow: inset 3px 0 0 var(--warn); }
+.memory { font: 0.75rem/1.6 var(--font-mono); color: var(--muted); display: grid; gap: 2px; }
+.memory span { color: var(--ink); }
+.log {
+  font: 0.74rem/1.55 var(--font-mono); background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  height: 380px; overflow: auto; padding: 8px 0; margin: 0; list-style: none;
+}
+.log li { display: grid; grid-template-columns: 58px 112px minmax(0, 1fr); gap: 8px; padding: 1px 10px; }
+.log li .t { color: var(--muted); }
+.log li .fn { color: var(--info); overflow: hidden; text-overflow: ellipsis; }
+.log li .m { overflow-wrap: anywhere; }
+.log li.edge { background: var(--tally-soft); }
+.log li.edge .fn { color: var(--tally); }
+.log li.ok .m { color: var(--good); }
+.log li.fail .m { color: var(--warn); }
+.log li.muted .m { color: var(--muted); }
+.log li.ext .fn { color: var(--warn); }
+.status-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 0.85rem; }
+.toggle-list { display: grid; gap: 6px; font-size: 0.85rem; }
+.toggle-list label { display: flex; gap: 8px; align-items: flex-start; }
+.hint { font-size: 0.8rem; color: var(--muted); margin: 0; }
+
+/* Steps (a real sequence: the order is the point) */
+.steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 0; max-width: 78ch; counter-reset: step; }
+.steps li { counter-increment: step; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.steps li::before { content: counter(step, decimal-leading-zero); font: 500 0.85rem/1.8 var(--font-mono); color: var(--tally); }
+.steps li > div { min-width: 0; }
+.steps b { font-weight: 600; }
+.steps p { margin: 4px 0 0; color: var(--muted); font-size: 0.95rem; }
+
+/* Tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+th { font: 500 0.72rem var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); background: var(--bg); }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+
+/* Target type trio */
+.trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.type { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.type h3 { margin: 0; font: 700 1.5rem/1 var(--font-display); text-transform: uppercase; letter-spacing: 0.03em; }
+.type p { margin: 0; font-size: 0.92rem; }
+.type .file { margin-top: -4px; }
+.type pre { font-size: 0.74rem; padding: 10px 12px; }
+
+.callout { border-left: 3px solid var(--tally); background: var(--surface); padding: 14px 18px; max-width: 74ch; border-radius: 0 var(--radius) var(--radius) 0; }
+.callout p { margin: 0; }
+.callout p + p { margin-top: 8px; }
+
+/* Template playground */
+.play { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+.play label { display: grid; gap: 4px; font-size: 0.8rem; color: var(--muted); }
+.play input[type=text], .play textarea, .play select {
+  font: 0.82rem var(--font-mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 7px 9px; width: 100%;
+}
+.play textarea { resize: vertical; min-height: 64px; }
+.play .col { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.play .out { font: 0.8rem/1.5 var(--font-mono); background: var(--sunken); border-radius: 4px; padding: 9px 11px; overflow-wrap: anywhere; color: var(--ink); min-height: 2.6em; }
+.play .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; font-size: 0.85rem; color: var(--ink); }
+.play .row label { display: flex; gap: 6px; align-items: center; color: var(--ink); font-size: 0.85rem; }
+mark { background: var(--tally-soft); color: var(--ink); border-radius: 3px; padding: 0 2px; }
+
+/* File map */
+.files { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 32px; max-width: 980px; }
+.files div { padding: 12px 0; border-top: 1px solid var(--line); min-width: 0; }
+.files code { font-weight: 500; }
+.files .lines { font: 0.75rem var(--font-mono); color: var(--muted); margin-left: 6px; }
+.files p { margin: 4px 0 0; font-size: 0.9rem; color: var(--muted); }
+
+footer { border-top: 1px solid var(--line); background: var(--surface); }
+footer .inner { max-width: 1180px; margin: 0 auto; padding-block: 24px; font-size: 0.85rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+footer a { color: inherit; }
+
+@media (max-width: 980px) {
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .toc { position: static; }
+  .toc ol { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  .sim { grid-template-columns: minmax(0, 1fr); }
+  .sim-col + .sim-col { border-left: 0; border-top: 1px solid var(--line); }
+  .trio { grid-template-columns: minmax(0, 1fr); }
+  .play { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .masthead-inner { grid-template-columns: minmax(0, 1fr); }
+  .masthead .tally-wrap { justify-items: start; }
+  .files { grid-template-columns: minmax(0, 1fr); }
+  .outputs { grid-template-columns: minmax(0, 1fr); }
+  .log li { grid-template-columns: 50px minmax(0, 1fr); }
+  .log li .fn { grid-column: 2; }
+  .log li .m { grid-column: 2; }
+  .log li .t { grid-row: span 2; }
+}
+</style>
+</head>
+<body>
+
+<header class="masthead gutter">
+  <div class="masthead-inner">
+    <div>
+      <div class="eyebrow">Technical guide · extension v0.8.3</div>
+      <h1>Inside ON-AIR<br>Meeting Trigger</h1>
+      <p class="lede">A Manifest V3 browser extension for Chrome, Chromium and Firefox. When a <strong>Google Meet, Zoom, Teams or custom meeting tab</strong> opens, it switches on an ON-AIR sign, a smart plug, a Home Assistant automation, a phone notification or any HTTP endpoint. When the last meeting tab closes, it switches them off again. This page explains every part of it and what the code does, with a simulator you can run.</p>
+      <div class="meta-row">
+        <a href="https://github.com/mveplus/onair-meeting-trigger">github.com/mveplus/onair-meeting-trigger</a>
+        <span>~4,500 lines of plain JavaScript</span>
+        <span>no build step · no dependencies</span>
+        <span>118 unit tests</span>
+      </div>
+    </div>
+    <div class="tally-wrap">
+      <div class="tally lit" id="hero_tally" role="button" tabindex="0" aria-pressed="true" aria-label="Toggle the demo sign">On Air</div>
+      <span class="tally-hint">click me</span>
+    </div>
+  </div>
+</header>
+
+<div class="shell gutter">
+  <nav class="toc" aria-label="Contents">
+    <p class="eyebrow">Contents</p>
+    <ol id="toc">
+      <li><a href="#overview">The big picture</a></li>
+      <li><a href="#simulator">Try it</a></li>
+      <li><a href="#lifecycle">Life of a meeting</a></li>
+      <li><a href="#detection">Meeting detection</a></li>
+      <li><a href="#targets">Targets</a></li>
+      <li><a href="#templates">Templates &amp; escaping</a></li>
+      <li><a href="#reliability">Staying in sync</a></li>
+      <li><a href="#storage">Storage &amp; secrets</a></li>
+      <li><a href="#ui">The UI pages</a></li>
+      <li><a href="#files">File map</a></li>
+      <li><a href="#build">Build, test, release</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <!-- 01 OVERVIEW -->
+    <section id="overview">
+      <h2><span class="num">01</span>The big picture</h2>
+      <p class="kicker">One background script does the real work. It watches tabs, decides whether you are in a meeting, and sends HTTP requests to the outputs you configured. Everything else is UI or pure helper logic.</p>
+
+      <div class="figure">
+        <svg viewBox="0 0 980 560" role="img" aria-labelledby="arch_t arch_d">
+          <title id="arch_t">Architecture</title>
+          <desc id="arch_d">Browser tab events and a one-minute alarm feed background.js, which uses shared.js and three storage areas, and sends requests to listener, webhook and ON-AIR sign targets. The popup, options and diagnostics pages talk to the worker through messages and storage.</desc>
+          <defs>
+            <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker>
+            <marker id="ahh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow-hot" d="M0,0 L10,5 L0,10 z"/></marker>
+          </defs>
+
+          <!-- Browser column -->
+          <rect class="grp" x="12" y="14" width="236" height="532" rx="8"/>
+          <text class="t-group" x="28" y="36">BROWSER</text>
+          <rect class="box" x="28" y="50" width="204" height="92" rx="6"/>
+          <text class="t-head" x="42" y="74">Tabs &amp; windows</text>
+          <text class="t-mono" x="42" y="94">onCreated · onUpdated</text>
+          <text class="t-mono" x="42" y="110">onRemoved · onActivated</text>
+          <text class="t-mono" x="42" y="126">windows.onFocusChanged</text>
+          <rect class="box" x="28" y="158" width="204" height="58" rx="6"/>
+          <text class="t-head" x="42" y="182">chrome.alarms</text>
+          <text class="t-mono" x="42" y="202">"onair-reconcile" · 1 min</text>
+
+          <text class="t-group" x="28" y="262">EXTENSION PAGES</text>
+          <rect class="box" x="28" y="274" width="204" height="58" rx="6"/>
+          <text class="t-head" x="42" y="298">Toolbar popup</text>
+          <text class="t-mono" x="42" y="318">popup.html / popup.js</text>
+          <rect class="box" x="28" y="346" width="204" height="58" rx="6"/>
+          <text class="t-head" x="42" y="370">Settings page</text>
+          <text class="t-mono" x="42" y="390">options.html / options.js</text>
+          <rect class="box" x="28" y="418" width="204" height="70" rx="6"/>
+          <text class="t-head" x="42" y="442">Diagnostics</text>
+          <text class="t-mono" x="42" y="462">diagnostics.html / .js</text>
+          <text class="t-mono" x="42" y="478">+ DevTools panel</text>
+
+          <!-- Core -->
+          <rect class="grp" x="282" y="14" width="390" height="532" rx="8"/>
+          <text class="t-group" x="298" y="36">EXTENSION CORE</text>
+          <rect class="box-core" x="298" y="50" width="358" height="262" rx="6"/>
+          <text class="t-head" x="314" y="74">background.js</text>
+          <text class="t-mono" x="420" y="74">service worker / event page</text>
+          <rect class="box" x="314" y="88" width="326" height="30" rx="4"/>
+          <text class="t-mono" x="326" y="108">tick(reason) · ensureCurrent() · computeState()</text>
+          <rect class="box" x="314" y="126" width="326" height="30" rx="4"/>
+          <text class="t-mono" x="326" y="146">400 ms debounce → edge?</text>
+          <rect class="box-hot" x="314" y="164" width="326" height="30" rx="4"/>
+          <text class="t-mono" x="326" y="184">applySideEffects() → dispatchTarget() ×N</text>
+          <rect class="box" x="314" y="202" width="326" height="30" rx="4"/>
+          <text class="t-mono" x="326" y="222">reconcilePass()  (alarm only)</text>
+          <rect class="box" x="314" y="240" width="326" height="30" rx="4"/>
+          <text class="t-mono" x="326" y="260">callUrl(): timeout · retry · AbortController</text>
+          <text class="t-mono" x="314" y="296">onMessage: GET_STATE · TEST_TARGET · SET_PAUSE …</text>
+
+          <rect class="box" x="298" y="326" width="358" height="58" rx="6"/>
+          <text class="t-head" x="314" y="350">shared.js</text>
+          <text class="t-mono" x="390" y="350">pure helpers · unit-tested in Node</text>
+          <text class="t-mono" x="314" y="370">matchService · applyTemplate · extractSecrets …</text>
+
+          <text class="t-group" x="298" y="414">STORAGE</text>
+          <rect class="box" x="298" y="424" width="112" height="104" rx="6"/>
+          <text class="t-head" x="310" y="446">sync</text>
+          <text class="t-mono" x="310" y="466">config</text>
+          <text class="t-mono" x="310" y="482">(no secrets)</text>
+          <rect class="box" x="421" y="424" width="112" height="104" rx="6"/>
+          <text class="t-head" x="433" y="446">local</text>
+          <text class="t-mono" x="433" y="466">secrets · pause</text>
+          <text class="t-mono" x="433" y="482">activityLog</text>
+          <text class="t-mono" x="433" y="498">debugLogs</text>
+          <rect class="box" x="544" y="424" width="112" height="104" rx="6"/>
+          <text class="t-head" x="556" y="446">session</text>
+          <text class="t-mono" x="556" y="466">runtimeState</text>
+          <text class="t-mono" x="556" y="482">lastDispatch</text>
+          <text class="t-mono" x="556" y="498">offFailed</text>
+
+          <!-- Targets -->
+          <rect class="grp" x="706" y="14" width="262" height="532" rx="8"/>
+          <text class="t-group" x="722" y="36">TARGETS (HTTP)</text>
+          <rect class="box" x="722" y="50" width="230" height="74" rx="6"/>
+          <text class="t-head" x="736" y="74">listener</text>
+          <text class="t-mono" x="736" y="94">your own app / script</text>
+          <text class="t-mono" x="736" y="110">GET ?state=ON&amp;service=…</text>
+          <rect class="box" x="722" y="138" width="230" height="92" rx="6"/>
+          <text class="t-head" x="736" y="162">httpHook</text>
+          <text class="t-mono" x="736" y="182">Tasmota · Shelly</text>
+          <text class="t-mono" x="736" y="198">Home Assistant · Ntfy</text>
+          <text class="t-mono" x="736" y="214">any ON URL / OFF URL</text>
+          <rect class="box-hot" x="722" y="244" width="230" height="100" rx="6"/>
+          <text class="t-head" x="736" y="268">iotHybrid · ON-AIR sign</text>
+          <text class="t-mono" x="736" y="288">1 · LAN  /api/set?state=1</text>
+          <text class="t-mono" x="736" y="304">2 · cloud POST ?thing&amp;mode</text>
+          <text class="t-mono" x="736" y="320">verify: /api/status</text>
+          <rect class="box" x="722" y="366" width="230" height="72" rx="6"/>
+          <text class="t-head" x="736" y="390">Cloud bridge</text>
+          <text class="t-mono" x="736" y="410">Lambda → AWS IoT</text>
+          <text class="t-mono" x="736" y="426">Device Shadow readback</text>
+          <rect class="box" x="722" y="452" width="230" height="76" rx="6"/>
+          <text class="t-head" x="736" y="476">ESP32-C6 sign</text>
+          <text class="t-mono" x="736" y="496">onair-led-sign-firmware</text>
+          <text class="t-mono" x="736" y="512">(separate repo)</text>
+
+          <!-- Wires -->
+          <path class="wire" d="M232,96 H270 V103 H312" marker-end="url(#ah)"/>
+          <path class="wire" d="M232,187 H270 V110" />
+          <path class="wire" d="M232,303 H262 V280 H296" marker-end="url(#ah)" marker-start="url(#ah)"/>
+          <path class="wire" d="M232,375 H272 V290 H296" marker-end="url(#ah)"/>
+          <path class="wire" d="M477,312 V324" marker-end="url(#ah)"/>
+          <path class="wire" d="M477,384 V422" marker-start="url(#ah)" marker-end="url(#ah)"/>
+          <path class="wire" d="M477,528 V538 H262 V460 H234" marker-end="url(#ah)"/>
+          <path class="wire-hot" d="M640,179 H690 V87 H720" marker-end="url(#ahh)"/>
+          <path class="wire-hot" d="M690,179 H720" marker-end="url(#ahh)"/>
+          <path class="wire-hot" d="M690,179 V294 H720" marker-end="url(#ahh)"/>
+          <path class="wire" d="M837,344 V364" marker-end="url(#ah)"/>
+          <path class="wire" d="M837,438 V450" marker-end="url(#ah)"/>
+          <path class="wire" d="M952,300 H960 V490 H954" marker-end="url(#ah)"/>
+        </svg>
+      </div>
+      <p class="figcap">Red wires are what happens on a meeting edge: every enabled target gets one HTTP request. The ON-AIR sign tries the LAN first and falls back to the cloud bridge.</p>
+
+      <p>The extension has no content scripts and never reads page contents. Meeting detection uses only the <em>URL</em> of each tab, which the <code>tabs</code> permission exposes. Requests go only to the hosts you configure: the extension declares <code>http://*/*</code> and <code>https://*/*</code> as <em>optional</em> host permissions, and the settings page asks for each target's origin when you save it.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Manifest key</th><th>Value</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td><code>permissions</code></td><td><code>storage</code>, <code>tabs</code>, <code>alarms</code></td><td>Save settings, read tab URLs, run the 1-minute heartbeat.</td></tr>
+            <tr><td><code>optional_host_permissions</code></td><td><code>http://*/*</code>, <code>https://*/*</code></td><td>Requested per target origin, only when needed. Unused grants are revoked on save.</td></tr>
+            <tr><td><code>background</code></td><td><code>background.js</code>, <code>type: module</code></td><td>Chrome runs it as a service worker. The Firefox build rewrites this to an event page.</td></tr>
+            <tr><td><code>action</code> / <code>options_page</code> / <code>devtools_page</code></td><td><code>popup.html</code> / <code>options.html</code> / <code>devtools.html</code></td><td>The three UI surfaces.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 02 SIMULATOR -->
+    <section id="simulator">
+      <h2><span class="num">02</span>Try it</h2>
+      <p class="kicker">This simulator runs a small JavaScript copy of the worker's decision logic in your browser. Open and close tabs, pause, put the worker to sleep or knock the sign out of sync, and watch the trace on the right. The function names match <code>background.js</code>. No real requests are sent.</p>
+
+      <div class="sim">
+        <div class="sim-col">
+          <div>
+            <h4>Browser tabs</h4>
+            <div class="btn-row" style="margin-bottom:10px">
+              <button type="button" data-open="meet">+ Google Meet</button>
+              <button type="button" data-open="zoom">+ Zoom</button>
+              <button type="button" data-open="teams">+ Teams</button>
+              <button type="button" data-open="other">+ Other site</button>
+              <button type="button" data-open="phish" title="A look-alike host that starts with meet.google.com">+ Look-alike</button>
+            </div>
+            <div class="tabs" id="sim_tabs"></div>
+            <p class="hint" style="margin-top:8px">Click a tab's address to make it the active tab. A red dot means the URL matches a meeting service.</p>
+          </div>
+
+          <div>
+            <h4>Settings</h4>
+            <div class="settings">
+              <label for="sim_mode">Trigger when
+                <select id="sim_mode">
+                  <option value="ANY_TAB">Any matching tab is open</option>
+                  <option value="ACTIVE_TAB">Only the active tab matches</option>
+                </select>
+              </label>
+              <label><input type="checkbox" id="sim_privacy"> Include the full meeting URL in requests</label>
+            </div>
+          </div>
+
+          <div>
+            <h4>Outputs</h4>
+            <div class="outputs">
+              <div class="tally" id="sim_tally">On Air</div>
+              <div class="devices">
+                <div class="device"><span><b>ON-AIR sign</b> · iotHybrid · verify</span><span class="pill" id="sim_sign_pill">off</span></div>
+                <div class="device"><span><b>Tasmota plug</b> · httpHook · always</span><span class="pill" id="sim_plug_pill">off</span></div>
+                <div class="device"><span><b>Ntfy push</b> · httpHook · single</span><span class="pill" id="sim_push_pill">0 sent</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="phone" id="sim_phone" aria-label="Phone notifications"></div>
+        </div>
+
+        <div class="sim-col">
+          <div class="status-line">
+            <span class="pill" id="sim_state">OFF</span>
+            <span class="pill" id="sim_worker">worker awake</span>
+            <span class="pill" id="sim_pause" hidden>paused</span>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="primary" id="sim_alarm">Fire heartbeat alarm</button>
+            <button type="button" id="sim_pausebtn">Pause 1 hour</button>
+            <button type="button" id="sim_sleep">Suspend worker</button>
+          </div>
+          <div class="btn-row">
+            <button type="button" id="sim_drift">Switch the sign off by hand</button>
+            <button type="button" id="sim_net">Take the sign offline</button>
+            <button type="button" class="ghost" id="sim_clear">Clear trace</button>
+          </div>
+          <div class="toggle-list">
+            <label><input type="checkbox" id="sim_auto"> Fire the heartbeat every 8 s (sped up from 1 min)</label>
+            <label><input type="checkbox" id="sim_bug"> Replay the old bug: don't persist state in <code>storage.session</code></label>
+          </div>
+          <ol class="log" id="sim_log" aria-live="polite"></ol>
+          <div class="memory" id="sim_mem"></div>
+        </div>
+      </div>
+      <p class="hint">Things to try: open Meet, close it again within 400 ms (the debounce swallows the flicker). Open Meet, suspend the worker, then fire the heartbeat with and without the old bug. Switch the sign off by hand and fire the heartbeat to watch <code>verify</code> fix it. Take the sign offline while in a meeting, close the meeting, bring the sign back and fire the heartbeat.</p>
+    </section>
+
+    <!-- 03 LIFECYCLE -->
+    <section id="lifecycle">
+      <h2><span class="num">03</span>Life of a meeting</h2>
+      <p class="kicker">What happens between you clicking a Meet link and the sign lighting up, in the order the code runs it.</p>
+      <ol class="steps">
+        <li><div><b>A tab event wakes the worker.</b> <span class="file">background.js · chrome.tabs.on*</span>
+          <p>Listeners on tab create, update, remove, activate and window focus/remove all call <code>tick(reason)</code>. <code>onUpdated</code> fires for every title, favicon and loading change, so <code>isRelevantTabUpdate</code> only lets a URL change or a finished load through. Activation and focus only matter in "active tab" mode.</p></div></li>
+        <li><div><b>Load config, pause and last state.</b> <span class="file">getConfig · getPause · ensureCurrent</span>
+          <p><code>getConfig()</code> returns a cached, migrated config with secrets merged back in. <code>ensureCurrent()</code> hydrates the last state the worker applied from <code>storage.session</code>, once per worker lifetime. This is what stops a freshly woken worker from treating "still in a meeting" as a new meeting.</p></div></li>
+        <li><div><b>Work out the desired state.</b> <span class="file">computeState → matchService</span>
+          <p>Query tabs, drop any that are mid-close, and look for a URL that matches an enabled service. The result is <code>{state: "ON", service: "meet", url}</code> or OFF. If you have paused the extension, the result is forced to OFF, but the detected service is kept so the popup can say "In Google Meet · sign held off".</p></div></li>
+        <li><div><b>Same as before? Stop here.</b> <span class="file">sameState</span>
+          <p>Most ticks end here. Only the heartbeat alarm goes on to a reconcile pass (see <a href="#reliability">Staying in sync</a>).</p></div></li>
+        <li><div><b>Wait 400 ms and look again.</b> <span class="file">DEBOUNCE_MS</span>
+          <p>Navigations fire bursts of events. A <code>setTimeout</code> waits 400 ms, recomputes the state, and fires only if it still differs from what was last applied. A tab that redirects through a meeting URL and away again never triggers anything.</p></div></li>
+        <li><div><b>Commit the new state.</b> <span class="file">commitCurrent → saveCurrent</span>
+          <p>The in-memory <code>current</code> is updated and written to <code>storage.session</code> under <code>runtimeState</code>. It only writes when something changed.</p></div></li>
+        <li><div><b>Fire every enabled target once.</b> <span class="file">applySideEffects → dispatchTarget</span>
+          <p>The previous edge's <code>AbortController</code> is aborted first, so a slow retrying ON can never land after this OFF. The toolbar icon is updated in parallel. Template variables are built once (<code>{state} {service} {url} {ts}</code>) and each target runs through its executor concurrently with <code>Promise.allSettled</code>.</p></div></li>
+        <li><div><b>Record the outcome.</b> <span class="file">recordDispatch · recordOffFailures · logActivity</span>
+          <p>A summary goes to <code>storage.session.lastDispatch</code> for the popup's health line ("✓ All 3 targets updated 2m ago"). Targets whose OFF failed are remembered in <code>offFailed</code>. If diagnostics are on, a structured entry with per-target latency and errors is appended to the activity log.</p></div></li>
+        <li><div><b>Tell the popup.</b> <span class="file">broadcastState</span>
+          <p>A <code>STATE_CHANGED</code> message updates an open popup. If no popup is open the send rejects, and that rejection is expected and ignored.</p></div></li>
+      </ol>
+<pre><span class="c">// background.js — the heart of tick(), abridged</span>
+<span class="k">const</span> detected = <span class="k">await</span> computeState(cfg);
+<span class="k">const</span> next = isPaused(pause) ? { ...OFF_STATE } : detected;
+
+<span class="k">if</span> (sameState(next, current)) {
+  <span class="k">if</span> (reason === <span class="s">"alarm"</span> &amp;&amp; !isPaused(pause)) <span class="k">await</span> reconcilePass(cfg, current);
+  <span class="k">return</span>;
+}
+debounceTimer = setTimeout(<span class="k">async</span> () =&gt; {
+  <span class="k">const</span> prev = { ...current };
+  <span class="k">const</span> next2 = isPaused(pause2) ? { ...OFF_STATE } : <span class="k">await</span> computeState(cfg2);
+  <span class="k">await</span> commitCurrent(next2);
+  <span class="k">if</span> (sameState(next2, prev)) <span class="k">return</span>;        <span class="c">// settled back: no edge</span>
+  <span class="k">await</span> applySideEffects(current, cfg2, reason);
+  broadcastState(pause2);
+}, DEBOUNCE_MS);</pre>
+    </section>
+
+    <!-- 04 DETECTION -->
+    <section id="detection">
+      <h2><span class="num">04</span>Meeting detection</h2>
+      <p class="kicker">A meeting is a tab whose URL starts with a known prefix. The matching is stricter than it sounds.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Service</th><th>Built-in prefixes</th></tr></thead>
+          <tbody>
+            <tr><td>Google Meet</td><td><code>https://meet.google.com/</code></td></tr>
+            <tr><td>Microsoft Teams</td><td><code>https://teams.microsoft.com/</code></td></tr>
+            <tr><td>Zoom</td><td><code>https://zoom.us/</code>, <code>https://app.zoom.us/</code></td></tr>
+            <tr><td>Custom (yours)</td><td>Any name plus a list of prefixes, e.g. <code>https://meet.jit.si/</code>. A prefix typed without a scheme gets <code>https://</code> added.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Origin first, then path</h3>
+      <p class="prose"><code>urlMatchesPrefix</code> parses both URLs and requires the <em>exact origin</em> to match before comparing the path. A naive <code>startsWith</code> would let <code>https://meet.google.com.evil.example/</code> count as a Meet tab. The simulator's "Look-alike" button shows the difference. Custom services are checked before the built-ins, so a custom name wins on overlap.</p>
+
+      <h3>Two trigger modes</h3>
+      <ul>
+        <li><b>Any matching tab is open</b> (<code>ANY_TAB</code>, default). The sign is ON whenever a meeting tab exists anywhere, even in a background window or before you click Join. The worker asks Chrome to filter tabs by match pattern (<code>serviceMatchPatterns</code>) instead of listing every tab. It falls back to a full listing when a prefix can't be expressed as a pattern, such as one with a port or query string.</li>
+        <li><b>Only the active tab matches</b> (<code>ACTIVE_TAB</code>). Only the focused tab of the last-focused window counts, so switching away from the meeting turns the sign off.</li>
+      </ul>
+
+      <h3>Closing tabs in Firefox</h3>
+      <p class="prose">In Firefox, <code>tabs.query</code> still returns a tab while its <code>onRemoved</code> listeners run. Querying right after closing a meeting tab therefore still found the meeting, and the sign stayed ON until the next heartbeat. The worker now puts closing tab and window ids in a <code>closing</code> set for 10 seconds, and <code>withoutClosingTabs</code> filters them out.</p>
+    </section>
+
+    <!-- 05 TARGETS -->
+    <section id="targets">
+      <h2><span class="num">05</span>Targets</h2>
+      <p class="kicker">A target is one output. There are three types. Each has an executor in <code>background.js</code> that returns <code>{ok, status, error, via, ms}</code>, which feeds the popup, the log and the Test buttons.</p>
+
+      <div class="trio">
+        <div class="type">
+          <h3>Listener</h3>
+          <span class="file">runListenerTarget</span>
+          <p>The simplest one: a single URL called on every change, for your own local app or script. If the URL has no <code>{tokens}</code>, the state is appended as query parameters.</p>
+<pre>GET http://127.0.0.1:8765/event
+  ?state=ON&amp;service=meet
+  &amp;url=https%3A%2F%2Fmeet.google.com
+  &amp;ts=1760000000000</pre>
+          <p>Reconcile: <b>single</b> only.</p>
+        </div>
+        <div class="type">
+          <h3>Webhook</h3>
+          <span class="file">runHttpHookTarget</span>
+          <p>Separate ON and OFF URLs, any method, custom headers, Basic auth, a templated body, and a success rule: accepted status codes (default 200, 202, 204) plus an optional "response contains" string. Templates pre-fill Tasmota, Shelly, Home Assistant and Ntfy.</p>
+<pre>GET http://192.168.1.17/cm
+  ?cmnd=Power%20On
+→ 200 {"POWER":"ON"}</pre>
+          <p>Reconcile: <b>single</b> or <b>always</b>.</p>
+        </div>
+        <div class="type">
+          <h3>ON-AIR sign</h3>
+          <span class="file">runIotHybridTarget</span>
+          <p>For the companion ESP32 sign. It tries the LAN API first with a short timeout and no retries. If that fails, it falls back to the cloud bridge with the normal timeout and retries. Modes are 0 off, 1 on, 2 breathing.</p>
+<pre>GET  http://onair.local/api/set?state=1
+     X-API-Token: …
+↳ on failure:
+POST https://…/?thing=onair-sign&amp;mode=1
+     Authorization: Bearer …</pre>
+          <p>Reconcile: <b>single</b>, <b>verify</b> or <b>always</b>.</p>
+        </div>
+      </div>
+
+      <h3>The request engine</h3>
+      <p class="prose">Listener, webhook and cloud requests go through <code>callUrl()</code>. Each attempt gets its own timeout (the "request timeout" setting, 1–20 s, default 3 s) combined with the edge's abort signal. Fast network errors are retried up to <code>RETRY_MAX = 2</code> times with exponential backoff (250 ms, then 500 ms, capped at 2 s). A <em>timeout</em> is not retried, because a host that is down would only multiply the wait. A bad HTTP status is not retried either. Deciding success from status and body is left to <code>httpHookSuccess()</code>, the same function the settings page's Test button uses.</p>
+<pre><span class="c">// shared.js — one rule for "did it work?", used live and by Test</span>
+<span class="k">export function</span> httpHookSuccess(target, state, response) {
+  <span class="k">if</span> (!response || response.error) <span class="k">return false</span>;
+  <span class="k">if</span> (target?.checkStatus === <span class="k">false</span>) <span class="k">return true</span>;
+  <span class="k">const</span> okStatus = normalizeStatusCodes(target?.statusCodes).includes(response.status);
+  <span class="k">const</span> match = state === <span class="s">"ON"</span> ? (target?.matchOn || <span class="s">""</span>) : (target?.matchOff || <span class="s">""</span>);
+  <span class="k">return</span> okStatus &amp;&amp; (match ? String(response.text || <span class="s">""</span>).includes(match) : <span class="k">true</span>);
+}</pre>
+      <div class="callout">
+        <p><b>Test buttons run the real thing.</b> The settings page has no request code of its own. Its Test ON and Test OFF buttons send a <code>TEST_TARGET</code> message, and the worker runs the same <code>dispatchTarget()</code> a real meeting would. A target that passes its test behaves the same way live. Tests use their own abort signal, so a meeting edge can't cancel them.</p>
+      </div>
+    </section>
+
+    <!-- 06 TEMPLATES -->
+    <section id="templates">
+      <h2><span class="num">06</span>Templates &amp; escaping</h2>
+      <p class="kicker">URLs and bodies can contain <code>{state}</code>, <code>{service}</code>, <code>{url}</code>, <code>{url_raw}</code> and <code>{ts}</code>. Values are escaped for where they land, so a crafted meeting link can't inject parameters into your webhook.</p>
+      <ul>
+        <li>In URLs, values are <code>encodeURIComponent</code>-escaped. A meeting link containing <code>&amp;state=OFF</code> stays inside the <code>{url}</code> value.</li>
+        <li>In bodies that start with <code>{</code> or <code>[</code>, values are JSON-string escaped, and <code>Content-Type: application/json</code> is added unless you set one.</li>
+        <li><code>{url_raw}</code> is the escape hatch: always substituted unescaped.</li>
+        <li><code>{url}</code> respects the privacy setting. Off (the default) sends only the origin, such as <code>https://meet.google.com</code>, so the meeting ID never leaves the browser.</li>
+        <li>Parts you still have to fill in are written <code>YOUR_*</code>. The settings page flags them as warnings and doesn't request permission for placeholder hosts.</li>
+      </ul>
+
+      <div class="play">
+        <div class="col">
+          <label for="pl_tpl">URL template<input type="text" id="pl_tpl" value="https://hooks.example.net/onair?s={state}&amp;svc={service}&amp;from={url}"></label>
+          <label for="pl_body">Body template<textarea id="pl_body">{"text": "{state} in {service}", "link": "{url}"}</textarea></label>
+          <label for="pl_meet">Meeting tab URL<input type="text" id="pl_meet" value="https://meet.google.com/abc-defg-hij?authuser=0&amp;state=OFF&quot;x"></label>
+          <div class="row">
+            <label for="pl_state">State <select id="pl_state"><option>ON</option><option>OFF</option></select></label>
+            <label><input type="checkbox" id="pl_priv"> Include full meeting URL</label>
+          </div>
+        </div>
+        <div class="col">
+          <label>Request URL <span class="out" id="pl_out_url"></span></label>
+          <label>Body (<span id="pl_enc">json</span> escaping) <span class="out" id="pl_out_body"></span></label>
+          <label>Without escaping, the URL would read <span class="out" id="pl_out_raw"></span></label>
+          <p class="hint">Highlighted values were substituted. Try turning the full meeting URL on: in the unescaped version the meeting link's own <code>&amp;state=OFF</code> becomes a second, conflicting parameter.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 07 RELIABILITY -->
+    <section id="reliability">
+      <h2><span class="num">07</span>Staying in sync</h2>
+      <p class="kicker">MV3 background scripts are not long-lived. Chrome stops the service worker after about 30 seconds idle, and Firefox unloads the event page. Most of the subtle code exists so the sign stays correct anyway.</p>
+
+      <h3>The 1-minute heartbeat</h3>
+      <p class="prose">A <code>chrome.alarms</code> alarm named <code>onair-reconcile</code> fires every minute. It wakes the worker and calls <code>tick("alarm")</code>, which recomputes the state from scratch. A tab event missed while the worker was asleep is corrected within a minute. The alarm is created on install, on browser startup and at every worker start, so a reload doesn't lose it.</p>
+
+      <h3>Persisted state: the duplicate notification bug</h3>
+      <p class="prose">The worker's <code>current</code> state used to live only in a module variable. When the worker was stopped and restarted, it came back as OFF. The heartbeat then saw the meeting tab, read OFF → ON as a new edge, and fired every target again. Ntfy users got a fresh "in a meeting" push every few minutes. The fix stores the last applied state in <code>chrome.storage.session</code> (in memory, cleared on browser restart, never synced) and hydrates it at the top of <code>tick()</code>. Use the "Replay the old bug" checkbox in the simulator to see both behaviours.</p>
+
+      <h3>Reconcile policy, per target</h3>
+      <p class="prose">An edge fires every target once. What the heartbeat does afterwards depends on each target's policy:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Policy</th><th>On the heartbeat</th><th>Offered for</th><th>Use it when</th></tr></thead>
+          <tbody>
+            <tr><td><code>single</code></td><td>Nothing. Fires only on the edge.</td><td>all types; the only option for listeners</td><td>The target is a notification. Re-firing would spam.</td></tr>
+            <tr><td><code>verify</code></td><td>Reads the device's actual mode. Re-sends only if it drifted.</td><td>ON-AIR sign</td><td>A readback exists: <code>/api/status</code> on the LAN, else the cloud shadow via <code>GET ?thing=…</code>.</td></tr>
+            <tr><td><code>always</code></td><td>Re-sends the current state every minute.</td><td>webhook, ON-AIR sign</td><td>The setter is idempotent, like a smart plug's Power On.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="prose"><code>resolveReconcile</code> clamps a policy to what the type supports. A hand-edited import can't put <code>verify</code> on an Ntfy hook. Defaults are <code>single</code> for listeners and webhooks and <code>verify</code> for the sign.</p>
+
+      <h3>Two browsers, one sign</h3>
+      <p class="prose">OFF only means "no meeting in <em>this</em> browser". If your laptop is in a meeting and your desktop browser is idle, the desktop re-asserting OFF every minute would fight the laptop. So while a browser is OFF, the heartbeat holds (<code>heartbeatShouldFire</code>). It only retries a target whose own OFF failed. Those targets are tracked in <code>storage.session.offFailed</code> by <code>trackOffFailures</code>: a failed OFF adds the target, a delivered OFF removes it, and a new ON edge clears the list.</p>
+<pre><span class="k">export function</span> heartbeatShouldFire(state, offFailed) {
+  <span class="k">return</span> state === <span class="s">"ON"</span> || offFailed === <span class="k">true</span>;
+}</pre>
+
+      <h3>Edge cancellation</h3>
+      <p class="prose">Each edge owns an <code>AbortController</code>. A new edge aborts the previous one, which cancels its in-flight fetches and pending retries. The cancelled results are tagged <code>superseded</code> and ignored. Without this, a slow ON that is still retrying could land after a quick OFF and leave the sign lit. The reconcile pass runs under the current edge's signal, so a new edge also cancels a stale re-assert.</p>
+
+      <h3>Small efficiencies</h3>
+      <ul>
+        <li>The config is cached in memory and dropped on <code>storage.onChanged</code> or a <code>CONFIG_UPDATED</code> message.</li>
+        <li>The toolbar icon is only re-set when colour/grey actually changes, since <code>setIcon</code> decodes four PNGs.</li>
+        <li>Activity-log writes are serialized through a promise chain, so concurrent edge, worker-start and reconcile writes can't overwrite each other.</li>
+        <li>Reconcile passes are only logged when something was actually sent, so the log shows remediations and not a per-minute heartbeat.</li>
+      </ul>
+    </section>
+
+    <!-- 08 STORAGE -->
+    <section id="storage">
+      <h2><span class="num">08</span>Storage &amp; secrets</h2>
+      <p class="kicker">Settings sync across your browsers. Credentials don't.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Area</th><th>Key</th><th>Contents</th></tr></thead>
+          <tbody>
+            <tr><td><code>storage.sync</code></td><td><code>config</code></td><td>Services, trigger mode, targets, custom services, preferences. Credentials blanked. Chrome mirrors this to your browser account.</td></tr>
+            <tr><td rowspan="4"><code>storage.local</code></td><td><code>secrets</code></td><td>Per-target tokens, passwords, secret headers and secret URLs, keyed by target id.</td></tr>
+            <tr><td><code>pause</code></td><td><code>{until}</code>: 0 = running, −1 = until resumed, otherwise epoch ms.</td></tr>
+            <tr><td><code>debugLogs</code>, <code>activityLog</code></td><td>The diagnostics switch and a ring buffer of at most 200 structured events.</td></tr>
+            <tr><td><code>theme</code> etc.</td><td>Per-device UI preferences.</td></tr>
+            <tr><td rowspan="3"><code>storage.session</code></td><td><code>runtimeState</code></td><td>Last applied <code>{state, service, url}</code>. Survives worker restarts; cleared when the browser closes.</td></tr>
+            <tr><td><code>lastDispatch</code></td><td>Summary of the last send, for the popup health line.</td></tr>
+            <tr><td><code>offFailed</code></td><td>Targets whose OFF didn't land, for the heartbeat retry.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>How secrets are found and split</h3>
+      <p class="prose"><code>extractSecrets(cfg)</code> returns a sanitized copy for sync and a secrets map for local storage. <code>applySecrets</code> merges them back when the config loads. Detection works by pattern, not a fixed list:</p>
+      <ul>
+        <li><b>Fields:</b> the sign's local and cloud tokens and the webhook's Basic-auth password.</li>
+        <li><b>Headers</b> whose name matches <code>auth|token|key|secret|cookie|session|passw</code>, such as <code>Authorization</code>, <code>X-Api-Key</code> or <code>Cookie</code>.</li>
+        <li><b>URLs that are themselves keys:</b> userinfo (<code>user:pass@</code>), query parameters like <code>token</code>, <code>api_key</code> or <code>sig</code>, and known webhook shapes for Home Assistant, Slack, Discord and IFTTT.</li>
+      </ul>
+      <p class="prose">If <code>loadConfig</code> finds a secret in synced storage (for example, from an older version), it moves it to local storage and rewrites the synced copy. Exports run through <code>redactSecrets</code> unless you tick "Include secrets", and imports list every host the imported targets would contact before they are applied.</p>
+
+      <h3>Other guard rails</h3>
+      <ul>
+        <li><b>No credentialed redirects.</b> <code>fetch</code> strips only <code>Authorization</code> on a cross-origin redirect. A custom <code>X-API-Token</code> would follow the redirect to another host. Any request carrying credentials uses <code>redirect: "error"</code> (<code>redirectPolicyFor</code>).</li>
+        <li><b>Cleartext warnings.</b> A token sent over plain <code>http://</code> to a public host is flagged on the target card. LAN addresses (RFC 1918, loopback, link-local, CGNAT/Tailscale, <code>.local</code>, <code>.lan</code>, IPv6 ULA) are allowed, since the sign lives there. IP ranges are only checked against real IP literals, so <code>10.evil.com</code> doesn't count as LAN.</li>
+        <li><b>Clamped inputs.</b> Modes must be 0, 1 or 2, timeouts are bounded, and unknown target types are dropped on load.</li>
+        <li><b>Messages from elsewhere are ignored.</b> The worker drops any message whose <code>sender.id</code> isn't this extension.</li>
+      </ul>
+    </section>
+
+    <!-- 09 UI -->
+    <section id="ui">
+      <h2><span class="num">09</span>The UI pages</h2>
+      <p class="kicker">Three surfaces, all plain HTML and ES modules that import <code>shared.js</code> for their text and logic.</p>
+
+      <h3>Toolbar popup</h3>
+      <p class="prose">A status card in red (ON AIR), neutral (Off air) or paused, with the detected meeting. Below it is a health line built from <code>lastDispatch</code> by <code>describeDispatchHealth</code>, for example "✓ All 3 targets updated 2m ago" or which target failed and why. Pause buttons hold the sign OFF for an hour or until you resume. The popup paints first from a <code>localStorage</code> cache to avoid a flash while the worker wakes, then asks <code>GET_STATE</code> and listens for <code>STATE_CHANGED</code>.</p>
+
+      <h3>Settings page</h3>
+      <p class="prose">Cards in order: Meeting detection, Targets, Preferences, Diagnostics, Backup &amp; restore. General controls save instantly. Target edits use a sticky save bar that appears only when <code>editsSignature()</code> differs from the saved baseline, and it names any site the browser will ask you to allow. On save, the page requests the missing host permissions (this has to be the first <code>await</code> of the click, because Firefox enforces the user gesture strictly), splits secrets, writes both storage areas, revokes origins no target uses any more, and sends <code>CONFIG_UPDATED</code>. All dynamic HTML goes through <code>esc()</code>.</p>
+
+      <h3>Diagnostics and the DevTools panel</h3>
+      <p class="prose">One viewer, <code>diagnostics.html</code>, shown two ways: as a tab from Settings, and as an "ON-AIR" panel in DevTools registered by <code>devtools.js</code>. It reads <code>activityLog</code> directly from <code>storage.local</code> and live-updates through <code>storage.onChanged</code>, so it works even while the worker is asleep. Entries are turned into readable lines in <code>shared.js</code> (<code>describeLogEntry</code>, <code>logSeverity</code>) and can be filtered by changes, reconcile, worker or errors.</p>
+
+      <h3>Messages between pages and the worker</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Message</th><th>From</th><th>What the worker does</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET_STATE</code></td><td>popup</td><td>Returns <code>{state, service, detected, pause}</code>.</td></tr>
+            <tr><td><code>STATE_CHANGED</code></td><td>worker → popup</td><td>Broadcast after an edge, pause or resume.</td></tr>
+            <tr><td><code>SET_PAUSE</code> / <code>RESUME</code></td><td>popup</td><td>Writes <code>pause</code>, ticks and broadcasts.</td></tr>
+            <tr><td><code>TEST_TARGET</code></td><td>settings</td><td>Runs <code>dispatchTarget</code> for the given target and state and returns status, latency and route (local or cloud).</td></tr>
+            <tr><td><code>CONFIG_UPDATED</code></td><td>settings</td><td>Drops the config cache and ticks so new settings apply now.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 10 FILES -->
+    <section id="files">
+      <h2><span class="num">10</span>File map</h2>
+      <div class="files">
+        <div><code>extension/manifest.json</code><p>MV3 manifest. Its <code>version</code> is the source of truth for releases.</p></div>
+        <div><code>extension/background.js</code><span class="lines">897 lines</span><p>Tab listeners, <code>tick()</code>, debounce, executors, retries, reconcile, persisted state, activity log, message handler.</p></div>
+        <div><code>extension/shared.js</code><span class="lines">1,045 lines</span><p>All pure logic: matching, templating, clamping, secrets, reconcile rules, UI text. No browser globals at import time, so Node can test it.</p></div>
+        <div><code>extension/options.html / options.js</code><span class="lines">1,375 lines JS</span><p>Settings UI: target cards, templates, permissions, save bar, import and export, Test buttons.</p></div>
+        <div><code>extension/popup.html / popup.js</code><span class="lines">204 lines JS</span><p>Status card, health line, pause controls.</p></div>
+        <div><code>extension/diagnostics.html / .js</code><span class="lines">144 lines JS</span><p>Activity log viewer with filters.</p></div>
+        <div><code>extension/devtools.html / .js</code><p>Registers the DevTools panel that hosts the diagnostics page.</p></div>
+        <div><code>tests/*.test.js</code><p>Node built-in test runner specs for <code>shared.js</code> and the Firefox manifest. <code>npm test</code>, no dependencies.</p></div>
+        <div><code>scripts/build-zip.sh</code><p>Builds <code>dist.zip</code> (Chrome) and <code>dist-firefox.zip</code>.</p></div>
+        <div><code>scripts/firefox-manifest.mjs</code><p>Turns the Chrome manifest into the Firefox one.</p></div>
+        <div><code>scripts/release.sh</code><p>Bumps the version, promotes the changelog, makes an annotated tag and pushes it.</p></div>
+        <div><code>scripts/cws-upload.sh / amo-submit.sh</code><p>Store uploads, called from CI.</p></div>
+      </div>
+    </section>
+
+    <!-- 11 BUILD -->
+    <section id="build">
+      <h2><span class="num">11</span>Build, test, release</h2>
+      <p class="kicker">There is no bundler. The <code>extension/</code> folder is the shipped package as-is.</p>
+<pre><span class="c"># unit tests (Node's built-in runner)</span>
+npm test
+
+<span class="c"># load unpacked: chrome://extensions → Developer mode → Load unpacked → extension/</span>
+<span class="c"># package both browsers</span>
+scripts/build-zip.sh          <span class="c"># → dist.zip, dist-firefox.zip</span>
+
+<span class="c"># cut a release from a clean, up-to-date main</span>
+scripts/release.sh --dry-run 0.8.4
+scripts/release.sh 0.8.4</pre>
+
+      <h3>Firefox from the same source</h3>
+      <p class="prose">Firefox MV3 has no extension service workers. <code>toFirefoxManifest()</code> rewrites <code>background.service_worker</code> to <code>background.scripts</code> (the same module, run as an event page), swaps <code>options_page</code> for <code>options_ui</code>, and adds the Gecko id <code>onair-meeting-trigger@mveplus</code> with minimum version 140 and <code>data_collection_permissions: none</code>. The code itself uses <code>chrome.*</code>, which works in both browsers.</p>
+
+      <h3>What a tag triggers</h3>
+      <ol class="steps">
+        <li><div><b>Version check.</b><p>The workflow fails if <code>manifest.json</code>'s version differs from the tag. This is why tags only come from <code>release.sh</code>.</p></div></li>
+        <li><div><b>Build both zips.</b><p><code>scripts/build-zip.sh</code>.</p></div></li>
+        <li><div><b>GitHub release.</b><p>Any existing release for the tag is deleted first (the repo uses immutable releases), then recreated with the zips attached.</p></div></li>
+        <li><div><b>Chrome Web Store draft.</b><p>Uploaded through the v2 API, but not published. If the previous version is still in review, the step skips with a warning. A person clicks "Submit for review".</p></div></li>
+        <li><div><b>Firefox Add-ons.</b><p><code>web-ext sign --channel listed</code>. Skips if the AMO keys are missing.</p></div></li>
+      </ol>
+    </section>
+
+  </main>
+</div>
+
+<footer class="gutter">
+  <div class="inner">
+    <span>ON-AIR Meeting Trigger · documentation for v0.8.3</span>
+    <span><a href="https://github.com/mveplus/onair-meeting-trigger">Source on GitHub</a> · <a href="https://github.com/mveplus/onair-meeting-trigger/blob/main/docs/PRIVACY.md">Privacy</a></span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // ---- masthead tally toggle -------------------------------------------
+  const hero = $("hero_tally");
+  const flipHero = () => { const on = hero.classList.toggle("lit"); hero.setAttribute("aria-pressed", String(on)); };
+  hero.addEventListener("click", flipHero);
+  hero.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flipHero(); } });
+
+  // ---- contents highlight ----------------------------------------------
+  const links = [...document.querySelectorAll("#toc a")];
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver(entries => {
+      for (const en of entries) {
+        if (!en.isIntersecting) continue;
+        links.forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + en.target.id));
+      }
+    }, { rootMargin: "-20% 0px -70% 0px" });
+    document.querySelectorAll("main > section").forEach(s => io.observe(s));
+  }
+
+  // ---- ports of the shared.js helpers the demos need --------------------
+  const URL_PREFIXES = {
+    meet: ["https://meet.google.com/"],
+    teams: ["https://teams.microsoft.com/"],
+    zoom: ["https://zoom.us/", "https://app.zoom.us/"]
+  };
+  function urlMatchesPrefix(url, prefix) {
+    let u, p;
+    try { u = new URL(url); p = new URL(prefix); } catch { return false; }
+    return u.origin === p.origin && (u.pathname + u.search).startsWith(p.pathname + p.search);
+  }
+  function matchService(url) {
+    for (const [key, prefixes] of Object.entries(URL_PREFIXES)) {
+      if (prefixes.some(p => urlMatchesPrefix(url, p))) return key;
+    }
+    return null;
+  }
+  function originOf(url) {
+    try { const o = new URL(url).origin; return o === "null" ? "" : o; } catch { return ""; }
+  }
+  function encodeValue(v, enc) {
+    const s = String(v ?? "");
+    if (enc === "url") return encodeURIComponent(s);
+    if (enc === "json") return JSON.stringify(s).slice(1, -1);
+    return s;
+  }
+  // Same substitution order as shared.js applyTemplate; `wrap` lets the
+  // playground highlight what was substituted.
+  function applyTemplate(str, vars, enc, wrap = s => s) {
+    const e = v => wrap(encodeValue(v, enc));
+    return String(str ?? "")
+      .replaceAll("{state}", e(vars.state))
+      .replaceAll("{service}", e(vars.service))
+      .replaceAll("{url_raw}", wrap(String(vars.url ?? "")))
+      .replaceAll("{url}", e(vars.url))
+      .replaceAll("{ts}", e(vars.ts));
+  }
+  const bodyEncodingFor = t => { const s = String(t ?? "").trim(); return s.startsWith("{") || s.startsWith("[") ? "json" : "none"; };
+
+  // ---- template playground ---------------------------------------------
+  const MARK_OPEN = "\u0001", MARK_CLOSE = "\u0002";
+  const marked = s => MARK_OPEN + s + MARK_CLOSE;
+  const showMarked = s => esc(s).replaceAll(MARK_OPEN, "<mark>").replaceAll(MARK_CLOSE, "</mark>");
+  function renderPlayground() {
+    const meeting = $("pl_meet").value.trim();
+    const full = $("pl_priv").checked;
+    const vars = { state: $("pl_state").value, service: matchService(meeting) || "custom", url: meeting ? (full ? meeting : originOf(meeting)) : "", ts: 1760000000000 };
+    const tpl = $("pl_tpl").value, body = $("pl_body").value;
+    const enc = bodyEncodingFor(body);
+    $("pl_out_url").innerHTML = showMarked(applyTemplate(tpl, vars, "url", marked));
+    $("pl_out_body").innerHTML = showMarked(applyTemplate(body, vars, enc, marked));
+    $("pl_out_raw").innerHTML = showMarked(applyTemplate(tpl, vars, "none", marked));
+    $("pl_enc").textContent = enc === "json" ? "JSON" : "no";
+  }
+  ["pl_tpl", "pl_body", "pl_meet", "pl_state", "pl_priv"].forEach(id => $(id).addEventListener("input", renderPlayground));
+  renderPlayground();
+
+  // ---- simulator ---------------------------------------------------------
+  const SAMPLE = {
+    meet: "https://meet.google.com/abc-defg-hij",
+    zoom: "https://app.zoom.us/wc/81234567890/join",
+    teams: "https://teams.microsoft.com/l/meetup-join/19%3ameeting_demo",
+    other: "https://github.com/mveplus/onair-meeting-trigger",
+    phish: "https://meet.google.com.evil.example/abc-defg-hij"
+  };
+  const NAMES = { meet: "Google Meet", zoom: "Zoom", teams: "Microsoft Teams" };
+  const OFF = { state: "OFF", service: null, url: null };
+  const TARGETS = [
+    { id: "sign", name: "ON-AIR sign", reconcile: "verify" },
+    { id: "plug", name: "Tasmota plug", reconcile: "always" },
+    { id: "ntfy", name: "Ntfy push", reconcile: "single" }
+  ];
+  const S = {
+    tabs: [{ id: 1, url: SAMPLE.other }], active: 1, nextId: 2,
+    mode: "ANY_TAB", privacy: false, paused: false,
+    current: { ...OFF }, stored: null, awake: true,
+    sign: { mode: 0, online: true }, plug: false, pushes: [], totalPushes: 0, offFailed: {},
+    timer: null, t0: performance.now(), auto: null
+  };
+
+  function log(fn, msg, kind = "") {
+    const li = document.createElement("li");
+    if (kind) li.className = kind;
+    const t = ((performance.now() - S.t0) / 1000).toFixed(2);
+    li.innerHTML = `<span class="t">+${t}s</span><span class="fn">${esc(fn)}</span><span class="m">${esc(msg)}</span>`;
+    const box = $("sim_log");
+    box.appendChild(li);
+    while (box.children.length > 300) box.firstChild.remove();
+    box.scrollTop = box.scrollHeight;
+  }
+
+  const same = (a, b) => a.state === b.state && a.service === b.service;
+  const label = st => st.state === "ON" ? `ON (${st.service})` : "OFF";
+
+  function computeState() {
+    if (S.mode === "ACTIVE_TAB") {
+      const t = S.tabs.find(x => x.id === S.active);
+      const svc = t && matchService(t.url);
+      return svc ? { state: "ON", service: svc, url: t.url } : { ...OFF };
+    }
+    for (const t of S.tabs) {
+      const svc = matchService(t.url);
+      if (svc) return { state: "ON", service: svc, url: t.url };
+    }
+    return { ...OFF };
+  }
+
+  function vars(st) {
+    return { state: st.state, service: st.service || "", url: st.url ? (S.privacy ? st.url : originOf(st.url)) : "", ts: Date.now() };
+  }
+
+  // One target's request. Returns {ok, line}.
+  function fire(t, v, action) {
+    const mode = v.state === "ON" ? 1 : 0;
+    if (t.id === "sign") {
+      if (!S.sign.online) {
+        return { ok: false, line: `GET http://onair.local/api/set?state=${mode} → timeout (1500 ms); POST cloud ?thing=onair-sign&mode=${mode} → device unreachable` };
+      }
+      S.sign.mode = mode;
+      return { ok: true, line: `GET http://onair.local/api/set?state=${mode} → 200 (via local)` };
+    }
+    if (t.id === "plug") {
+      S.plug = mode === 1;
+      return { ok: true, line: `GET http://192.168.1.17/cm?cmnd=Power%20${mode ? "On" : "Off"} → 200` };
+    }
+    // ntfy
+    // A second ON push with no OFF in between is the duplicate-push bug.
+    const dup = v.state === "ON" && S.pushes.length > 0 && S.pushes[0].on;
+    S.totalPushes++;
+    S.pushes.unshift({ on: v.state === "ON", text: v.state === "ON" ? "📞 ON-AIR · Do not disturb, in a meeting" : "✅ OFF-AIR · Meeting ended", dup, action });
+    S.pushes = S.pushes.slice(0, 4);
+    return { ok: true, line: `GET https://ntfy.sh/YOUR_TOPIC/publish?title=${v.state === "ON" ? "ON-AIR" : "OFF-AIR"}… → 200${dup ? "  ← duplicate push!" : ""}` };
+  }
+
+  function trackOffFailures(results, state) {
+    if (state === "ON") { S.offFailed = {}; return; }
+    for (const r of results) {
+      if (r.noop) continue;
+      if (r.ok === false) S.offFailed[r.id] = true;
+      else if (r.ok === true) delete S.offFailed[r.id];
+    }
+  }
+
+  function applySideEffects(next, reason) {
+    log("applySideEffects", `EDGE → ${label(next)}  (reason: ${reason}); aborting previous edge's requests`, "edge");
+    const v = vars(next);
+    log("makeVars", `{state:"${v.state}", service:"${v.service}", url:"${v.url}"}`, "muted");
+    const results = TARGETS.map(t => {
+      const r = fire(t, v, "edge");
+      log("dispatchTarget", `${t.name}: ${r.line}`, r.ok ? "ok" : "fail");
+      return { id: t.id, ok: r.ok };
+    });
+    trackOffFailures(results, next.state);
+    if (Object.keys(S.offFailed).length) log("recordOffFailures", `offFailed = ${JSON.stringify(S.offFailed)}`, "muted");
+    log("broadcastState", "STATE_CHANGED → popup", "muted");
+  }
+
+  function reconcilePass() {
+    const cur = S.current;
+    log("reconcilePass", `state ${label(cur)}: checking targets by policy`);
+    const results = [];
+    for (const t of TARGETS) {
+      if (t.reconcile === "single") { log("reconcileTarget", `${t.name}: single → skip`, "muted"); continue; }
+      if (!(cur.state === "ON" || S.offFailed[t.id] === true)) {
+        log("reconcileTarget", `${t.name}: OFF here and our OFF landed → hold (another browser may own the sign)`, "muted");
+        continue;
+      }
+      const v = vars(cur);
+      if (t.reconcile === "always") {
+        const r = fire(t, v, "reassert");
+        log("reconcileTarget", `${t.name}: always → re-assert. ${r.line}`, r.ok ? "ok" : "fail");
+        results.push({ id: t.id, ok: r.ok });
+        continue;
+      }
+      // verify
+      const desired = cur.state === "ON" ? 1 : 0;
+      const actual = S.sign.online ? S.sign.mode : null;
+      if (actual === null) {
+        log("readIotHybridMode", `${t.name}: /api/status timed out, cloud shadow unavailable → unknown, leave it`, "fail");
+        results.push({ id: t.id, noop: true });
+      } else if (actual !== desired) {
+        const r = fire(t, v, "remediate");
+        log("reconcileTarget", `${t.name}: read mode ${actual}, want ${desired} → DRIFT, remediate. ${r.line}`, r.ok ? "ok" : "fail");
+        results.push({ id: t.id, ok: r.ok });
+      } else {
+        log("reconcileTarget", `${t.name}: /api/status mode ${actual} = desired → nothing to do`, "muted");
+        results.push({ id: t.id, noop: true });
+      }
+    }
+    if (cur.state === "OFF") trackOffFailures(results, "OFF");
+  }
+
+  function tick(reason) {
+    log("tick", `reason="${reason}"`);
+    if (!S.awake) {
+      S.awake = true;
+      log("worker", "started (cold start)", "muted");
+      if (S.stored && !$("sim_bug").checked) {
+        S.current = { ...S.stored };
+        log("ensureCurrent", `hydrated runtimeState ${label(S.current)} from storage.session`, "ok");
+      } else {
+        log("ensureCurrent", $("sim_bug").checked ? "old build: nothing persisted, current stays OFF" : "nothing stored yet, current = OFF", "fail");
+      }
+    }
+    const detected = computeState();
+    const next = S.paused ? { ...OFF } : detected;
+    log("computeState", `detected ${label(detected)}${S.paused ? " · paused → forced OFF" : ""}`, "muted");
+    if (same(next, S.current)) {
+      log("tick", `same as current (${label(S.current)}) → no edge`, "muted");
+      if (reason === "alarm" && !S.paused) reconcilePass();
+      render();
+      return;
+    }
+    log("tick", `${label(S.current)} → ${label(next)}? wait ${400} ms (debounce)`);
+    clearTimeout(S.timer);
+    S.timer = setTimeout(() => {
+      S.timer = null;
+      const prev = { ...S.current };
+      const d2 = computeState();
+      const n2 = S.paused ? { ...OFF } : d2;
+      S.current = { ...n2 };
+      if (!$("sim_bug").checked) S.stored = { state: n2.state, service: n2.service, url: n2.url };
+      if (same(n2, prev)) {
+        log("debounce", `settled back to ${label(n2)} → nothing fired`, "muted");
+      } else {
+        applySideEffects(n2, reason);
+      }
+      render();
+    }, 400);
+    render();
+  }
+
+  // ---- rendering ---------------------------------------------------------
+  function render() {
+    const tabs = $("sim_tabs");
+    tabs.innerHTML = S.tabs.length ? S.tabs.map(t => {
+      const m = matchService(t.url);
+      return `<div class="tab${t.id === S.active ? " active" : ""}">
+        <span class="dot${m ? " match" : ""}" title="${m ? "matches " + esc(NAMES[m]) : "no match"}"></span>
+        <button type="button" class="url" data-act="${t.id}" title="${esc(t.url)}">${esc(t.url.replace(/^https:\/\//, ""))}</button>
+        <button type="button" class="x" data-close="${t.id}" aria-label="Close tab">×</button>
+      </div>`;
+    }).join("") : `<p class="empty-tabs">No tabs open. Add one above.</p>`;
+
+    const lit = S.sign.mode > 0;
+    $("sim_tally").classList.toggle("lit", lit);
+    const sp = $("sim_sign_pill");
+    sp.textContent = !S.sign.online ? (lit ? "on · offline" : "off · offline") : (lit ? "on" : "off");
+    sp.className = "pill" + (lit ? " on" : "") + (!S.sign.online ? " bad" : "");
+    const pp = $("sim_plug_pill");
+    pp.textContent = S.plug ? "on" : "off";
+    pp.className = "pill" + (S.plug ? " on" : "");
+    $("sim_push_pill").textContent = `${S.totalPushes} sent`;
+
+    $("sim_phone").innerHTML = `<h4 style="margin:0">Phone · ntfy</h4>` + (S.pushes.length
+      ? S.pushes.map(p => `<div class="note${p.dup ? " dup" : ""}"><b>${esc(p.text)}</b>${p.dup ? "Duplicate: nothing changed, the worker just woke up" : esc(p.action === "edge" ? "sent on the edge" : p.action)}</div>`).join("")
+      : `<div class="note">No notifications yet.</div>`);
+
+    const st = $("sim_state");
+    st.textContent = S.current.state === "ON" ? `ON AIR · ${NAMES[S.current.service] || S.current.service}` : "OFF";
+    st.className = "pill" + (S.current.state === "ON" ? " on" : "");
+    const w = $("sim_worker");
+    w.textContent = S.awake ? "worker awake" : "worker suspended";
+    w.className = "pill" + (S.awake ? " good" : " bad");
+    $("sim_pause").hidden = !S.paused;
+    $("sim_pausebtn").textContent = S.paused ? "Resume" : "Pause 1 hour";
+    $("sim_net").textContent = S.sign.online ? "Take the sign offline" : "Bring the sign back online";
+
+    $("sim_mem").innerHTML =
+      `<div>current (module variable) = <span>${esc(S.awake ? label(S.current) : "lost while suspended")}</span></div>` +
+      `<div>storage.session.runtimeState = <span>${esc(S.stored ? label(S.stored) : "(empty)")}</span></div>` +
+      `<div>storage.session.offFailed = <span>${esc(JSON.stringify(S.offFailed))}</span></div>`;
+  }
+
+  // ---- wiring ------------------------------------------------------------
+  document.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => {
+    const id = S.nextId++;
+    S.tabs.push({ id, url: SAMPLE[b.dataset.open] });
+    S.active = id;
+    log("tabs.onCreated", `opened ${SAMPLE[b.dataset.open]}`, "ext");
+    tick("created");
+  }));
+  $("sim_tabs").addEventListener("click", e => {
+    const close = e.target.closest("[data-close]");
+    const act = e.target.closest("[data-act]");
+    if (close) {
+      const id = Number(close.dataset.close);
+      const t = S.tabs.find(x => x.id === id);
+      S.tabs = S.tabs.filter(x => x.id !== id);
+      if (S.active === id) S.active = S.tabs.length ? S.tabs[S.tabs.length - 1].id : null;
+      log("tabs.onRemoved", `closed ${t ? t.url : id}`, "ext");
+      tick("removed");
+    } else if (act) {
+      S.active = Number(act.dataset.act);
+      log("tabs.onActivated", "switched tab", "ext");
+      if (S.mode === "ACTIVE_TAB") tick("activated"); else { log("tickIfActiveTabMode", "any-tab mode → ignored", "muted"); render(); }
+    }
+  });
+  $("sim_mode").addEventListener("change", e => { S.mode = e.target.value; log("CONFIG_UPDATED", `triggerMode = ${S.mode}`, "ext"); tick("config"); });
+  $("sim_privacy").addEventListener("change", e => { S.privacy = e.target.checked; log("CONFIG_UPDATED", `includeMeetingUrl = ${S.privacy}`, "ext"); tick("config"); });
+  $("sim_alarm").addEventListener("click", () => { log("alarms.onAlarm", "onair-reconcile", "ext"); tick("alarm"); });
+  $("sim_pausebtn").addEventListener("click", () => {
+    S.paused = !S.paused;
+    log(S.paused ? "SET_PAUSE" : "RESUME", S.paused ? "pause = {until: now + 1h}" : "pause = {until: 0}", "ext");
+    tick(S.paused ? "pause" : "resume");
+  });
+  $("sim_sleep").addEventListener("click", () => {
+    if (!S.awake) return;
+    clearTimeout(S.timer); S.timer = null;
+    S.awake = false;
+    S.current = { ...OFF };
+    log("worker", "suspended after ~30 s idle: module variables are gone", "fail");
+    render();
+  });
+  $("sim_drift").addEventListener("click", () => {
+    if (!S.sign.online) { log("(outside)", "the sign is offline; bring it back first", "muted"); return; }
+    S.sign.mode = 0;
+    log("(outside)", "someone switched the sign off at the device", "ext");
+    render();
+  });
+  $("sim_net").addEventListener("click", () => {
+    S.sign.online = !S.sign.online;
+    log("(outside)", S.sign.online ? "sign back on the network" : "sign unplugged from the network", "ext");
+    render();
+  });
+  $("sim_clear").addEventListener("click", () => { $("sim_log").innerHTML = ""; });
+  $("sim_auto").addEventListener("change", e => {
+    clearInterval(S.auto); S.auto = null;
+    if (e.target.checked) S.auto = setInterval(() => { log("alarms.onAlarm", "onair-reconcile (auto)", "ext"); tick("alarm"); }, 8000);
+  });
+  $("sim_bug").addEventListener("change", e => {
+    if (e.target.checked) { S.stored = null; log("(demo)", "old build: runtimeState is no longer written", "ext"); }
+    else { S.stored = S.awake ? { ...S.current } : S.stored; log("(demo)", "fixed build: runtimeState persisted again", "ext"); }
+    render();
+  });
+
+  log("worker", "started; alarm onair-reconcile created (1 min)", "muted");
+  S.stored = { ...OFF };
+  render();
+})();
+</script>
+</body>
+</html>
